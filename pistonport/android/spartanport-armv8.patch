@@ -1,24 +1,32 @@
 diff --git a/packaging/arm-linux/build.sh b/packaging/arm-linux/build.sh
-index 3c9c52f..3c92bd1 100755
+index 3c9c52f..9eae27a 100755
 --- a/packaging/arm-linux/build.sh
 +++ b/packaging/arm-linux/build.sh
-@@ -107,3 +107,4 @@ spartan_nixport=ON
+@@ -38,2 +38,7 @@ if [[ ! -d $sysroot/usr/lib/aarch64-linux-gnu ]]; then
+ fi
++# Imported CMake targets discovered through the merged /lib symlink can
++# resolve their default include path relative to the sysroot, outside /usr.
++if [[ ! -e $sysroot/include && ! -L $sysroot/include ]]; then
++    ln -s usr/include "$sysroot/include"
++fi
+ headers=${SPARTAN_ARM64_HEADERS:-}
+@@ -107,3 +112,4 @@ spartan_nixport=ON
  begin "FEXCore + libgportcpu.so"
 -if [[ ! -f $out/fex/build.ninja ]]; then
 +fex_tune_arch=${SPARTAN_FEX_TUNE_ARCH:-armv8.2-a}
 +if [[ ! -f $out/fex/build.ninja ]] || ! grep -Fxq "TUNE_ARCH:STRING=$fex_tune_arch" "$out/fex/CMakeCache.txt"; then
      cmake -S third_party/FEX -B "$out/fex" -G Ninja -DCMAKE_TOOLCHAIN_FILE="$tc" \
-@@ -111,3 +112,3 @@ if [[ ! -f $out/fex/build.ninja ]]; then
+@@ -111,3 +117,3 @@ if [[ ! -f $out/fex/build.ninja ]]; then
          -DBUILD_TESTING=OFF -DBUILD_THUNKS=OFF -DBUILD_FEXCONFIG=OFF -DBUILD_STEAM_SUPPORT=OFF \
 -        -DBUILD_FEX_LINUX_TESTS=OFF -DENABLE_ZYDIS=OFF -DTUNE_ARCH=armv8.2-a -DTUNE_CPU=generic >/dev/null
 +        -DBUILD_FEX_LINUX_TESTS=OFF -DENABLE_ZYDIS=OFF -DTUNE_ARCH="$fex_tune_arch" -DTUNE_CPU=generic >/dev/null
  fi
-@@ -165,3 +166,3 @@ install -m755 "$out/fex/libgportcpu.so" "$out/bin/gpu/"
+@@ -165,3 +171,3 @@ install -m755 "$out/fex/libgportcpu.so" "$out/bin/gpu/"
  begin "rust launcher (optional)"
 -if command -v cargo >/dev/null 2>&1; then
 +if [[ ${SPARTAN_APPDIR_ONLY:-0} != 1 ]] && command -v cargo >/dev/null 2>&1; then
      bash launcher-rust/build-aarch64.sh
-@@ -275,2 +276,8 @@ done
+@@ -275,2 +281,8 @@ done
 
 +# Leave an unpacked runtime for external ports to stage their own entry point.
 +if [[ ${SPARTAN_APPDIR_ONLY:-0} == 1 ]]; then
