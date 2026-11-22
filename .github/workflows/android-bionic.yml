@@ -37,9 +37,18 @@ jobs:
           git -C "$src" submodule update --init --recursive --depth 1 --jobs 4
           git -C "$src" apply "$GITHUB_WORKSPACE/pistonport/native-android/spartanport-bionic.patch"
 
+      - name: Install the Android NDK
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION"'
+
+      - uses: actions/cache/restore@v4
+        id: bionic-cpu
+        with:
+          path: ${{ runner.temp }}/bionic-cpu/libgportcpu.so
+          key: piston-bionic-cpu-v1-${{ env.SPARTAN_REF }}-${{ env.NDK_VERSION }}-${{ env.ANDROID_API }}-${{ hashFiles('pistonport/native-android/spartanport-bionic.patch') }}
+
       - name: Compile the ARMv8-A CPU backend with Bionic
+        if: steps.bionic-cpu.outputs.cache-hit != 'true'
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION"
           ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
           src="$RUNNER_TEMP/spartanport"
           build="$RUNNER_TEMP/bionic-cpu"
@@ -61,6 +70,12 @@ jobs:
           "$readelf" -d "$lib" | grep -F '[libc.so]'
           ! "$readelf" -d "$lib" | grep -E 'libc\.so\.6|libstdc\+\+\.so\.6|ld-linux'
           "$readelf" --dyn-syms --wide "$lib" | grep -E 'gport_guest_cpu_call$'
+
+      - uses: actions/cache/save@v4
+        if: steps.bionic-cpu.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/bionic-cpu/libgportcpu.so
+          key: ${{ steps.bionic-cpu.outputs.cache-primary-key }}
 
       - name: Install graphics build tools
         run: |
@@ -137,7 +152,7 @@ jobs:
             -DBoost_DIR="$prefix/lib/cmake/Boost" -Dtsl-robin-map_DIR="$prefix/lib/cmake/tsl-robin-map" \
             -DVMA_INCLUDE_DIR="$prefix/include" \
             -DSPARTAN_ANDROID_CPU="$RUNNER_TEMP/bionic-cpu/libgportcpu.so"
-          cmake --build "$RUNNER_TEMP/bionic-game" --target pistonport --parallel 4
+          cmake --build "$RUNNER_TEMP/bionic-game" --target pistonport --parallel 4 -- -k 0
 
       - uses: actions/cache/save@v4
         if: always()

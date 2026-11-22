@@ -38,6 +38,48 @@ index e933214..f95d0a0 100644
 +endif()
 +
  # spartanport (Windows): spartanportgpu is a static library there, so the loader and the HLE runtime are
+diff --git a/gpu/shadps4/video_core/buffer_cache/region_manager.h b/gpu/shadps4/video_core/buffer_cache/region_manager.h
+index 5d723a2..26c0aa2 100644
+--- a/gpu/shadps4/video_core/buffer_cache/region_manager.h
++++ b/gpu/shadps4/video_core/buffer_cache/region_manager.h
+@@ -16,5 +16,4 @@
+ #include "common/adaptive_mutex.h"
+-#else
+-#include "common/spin_lock.h"
+ #endif
++#include "common/spin_lock.h"
+ #include "common/debug.h"
+diff --git a/gpu/shadps4/video_core/page_manager.cpp b/gpu/shadps4/video_core/page_manager.cpp
+index 7f4f512..48e403b 100644
+--- a/gpu/shadps4/video_core/page_manager.cpp
++++ b/gpu/shadps4/video_core/page_manager.cpp
+@@ -25,3 +25,3 @@
+
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+ #include <thread>
+@@ -38,5 +38,4 @@
+ #include <sys/syscall.h>
+-#else
+-#include "common/spin_lock.h"
+ #endif
++#include "common/spin_lock.h"
+
+@@ -232,3 +231,3 @@ struct PageManager::Impl {
+
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+ // spartanport: write tracking with userfaultfd write-protection instead of mprotect. mprotect takes
+@@ -369,3 +368,3 @@ public:
+ };
+-#endif // __linux__
++#endif // desktop Linux userfaultfd
+
+@@ -393,3 +392,3 @@ struct SignalImpl : public PageManager::Impl {
+ PageManager::PageManager(Vulkan::Rasterizer* rasterizer_) {
+-#ifdef __linux__
++#if defined(__linux__) && !defined(__ANDROID__)
+     if (std::getenv("SPARTAN_UFFD") && std::getenv("SPARTAN_UFFD")[0] == '1') {
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp
 index 472be23..99092c1 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp
