@@ -1,0 +1,136 @@
+diff --git a/gpu/CMakeLists.txt b/gpu/CMakeLists.txt
+index e933214..cd2a6a8 100644
+--- a/gpu/CMakeLists.txt
++++ b/gpu/CMakeLists.txt
+@@ -58,3 +58,8 @@ endif()
+
+-find_package(Vulkan REQUIRED)
++if (ANDROID)
++    find_package(VulkanHeaders CONFIG REQUIRED)
++    add_compile_definitions(VK_USE_PLATFORM_ANDROID_KHR)
++else()
++    find_package(Vulkan REQUIRED)
++endif()
+ find_package(fmt REQUIRED)
+@@ -81,3 +86,3 @@ pkg_check_modules(XXHASH REQUIRED IMPORTED_TARGET libxxhash)
+ pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
+-if (NOT WIN32)
++if (NOT WIN32 AND NOT ANDROID)
+     pkg_check_modules(X11 REQUIRED IMPORTED_TARGET x11)
+@@ -167,3 +172,3 @@ file(GLOB SHIM_SOURCES CONFIGURE_DEPENDS shim/*.cpp shim/*/*.cpp)
+ # library is static there and linked into the executable.
+-if (WIN32)
++if (WIN32 OR ANDROID)
+     set(SPARTANGPU_KIND STATIC)
+@@ -209,3 +214,3 @@ if (WIN32)
+     target_link_libraries(spartanportgpu PUBLIC Vulkan::Vulkan ws2_32 bcrypt ntdll synchronization winmm pdh)
+-else()
++elseif (NOT ANDROID)
+     target_link_libraries(spartanportgpu PUBLIC PkgConfig::X11)
+@@ -213,2 +218,14 @@ endif()
+
++if (ANDROID)
++    file(GLOB SPARTAN_RUNTIME CONFIGURE_DEPENDS ../src/runtime*.c)
++    file(GLOB SPARTAN_ATRAC9 CONFIGURE_DEPENDS ../third_party/LibAtrac9/C/src/*.c)
++    add_library(atrac9 STATIC ${SPARTAN_ATRAC9})
++    set_target_properties(atrac9 PROPERTIES C_STANDARD 99)
++    add_library(pistonport SHARED ../src/probe.c ${SPARTAN_RUNTIME} ../src/vulkan_smoke.c)
++    set_target_properties(pistonport PROPERTIES C_STANDARD 11)
++    target_include_directories(pistonport PRIVATE .. ../src)
++    target_link_libraries(pistonport PRIVATE spartanportgpu atrac9 "${SPARTAN_ANDROID_CPU}"
++        android dl log m vulkan z)
++endif()
++
+ # spartanport (Windows): spartanportgpu is a static library there, so the loader and the HLE runtime are
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp
+index 472be23..99092c1 100644
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp
+@@ -4,4 +4,4 @@
+ // Include the vulkan platform specific header
+-#if defined(ANDROID)
+-#define VK_USE_PLATFORM_ANDROID_KHR
++#if defined(__ANDROID__)
++// The build enables VK_USE_PLATFORM_ANDROID_KHR across the renderer.
+ #elif defined(_WIN64)
+@@ -65,3 +65,12 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
+
+-#if defined(VK_USE_PLATFORM_WIN32_KHR)
++#if defined(VK_USE_PLATFORM_ANDROID_KHR)
++    if (window_info.type == Frontend::WindowSystemType::Android) {
++        const vk::AndroidSurfaceCreateInfoKHR create_info = {
++            .window = static_cast<ANativeWindow*>(window_info.render_surface),
++        };
++        if (instance.createAndroidSurfaceKHR(&create_info, nullptr, &surface) != vk::Result::eSuccess) {
++            UNREACHABLE_MSG("Failed to create Android Vulkan surface");
++        }
++    }
++#elif defined(VK_USE_PLATFORM_WIN32_KHR)
+     if (window_info.type == Frontend::WindowSystemType::Windows) {
+@@ -173,3 +182,7 @@ std::vector<const char*> GetInstanceExtensions(Frontend::WindowSystemType window
+         break;
+-#if defined(VK_USE_PLATFORM_WIN32_KHR)
++#if defined(VK_USE_PLATFORM_ANDROID_KHR)
++    case Frontend::WindowSystemType::Android:
++        extensions.push_back(VK_KHR_ANDROID_SURFACE_EXTENSION_NAME);
++        break;
++#elif defined(VK_USE_PLATFORM_WIN32_KHR)
+     case Frontend::WindowSystemType::Windows:
+diff --git a/gpu/shim/sdl_window.h b/gpu/shim/sdl_window.h
+index 27452be..f83048e 100644
+--- a/gpu/shim/sdl_window.h
++++ b/gpu/shim/sdl_window.h
+@@ -12,3 +12,3 @@ namespace Frontend {
+
+-enum class WindowSystemType : u8 { Headless, Windows, X11, Wayland, Metal };
++enum class WindowSystemType : u8 { Headless, Windows, X11, Wayland, Metal, Android };
+
+diff --git a/gpu/shim/window.cpp b/gpu/shim/window.cpp
+index a40c4f2..ea5e1b6 100644
+--- a/gpu/shim/window.cpp
++++ b/gpu/shim/window.cpp
+@@ -1,2 +1,2 @@
+-// spartanport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
++// spartanport: SDL3 window for the Vulkan swapchain.
+ #include <algorithm>
+@@ -144,2 +144,10 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
+     } else
++#endif
++#ifdef __ANDROID__
++    if (driver && !std::strcmp(driver, "android")) {
++        window_info.type = WindowSystemType::Android;
++        window_info.render_surface =
++            SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
++        ASSERT_MSG(window_info.render_surface, "SDL did not provide an Android native window");
++    } else
+ #endif
+diff --git a/src/probe.c b/src/probe.c
+index 5daee3d..cf86a0e 100644
+--- a/src/probe.c
++++ b/src/probe.c
+@@ -25,2 +25,5 @@
+ #include "gpu/spartanportgpu.h"
++#ifdef __ANDROID__
++#include <SDL3/SDL_main.h>
++#endif
+ #if !defined(__GNUC__)
+@@ -1273,2 +1276,6 @@ void runtime_restart(void) {
+     TerminateProcess(GetCurrentProcess(),0);
++#else
++#ifdef __ANDROID__
++    // SDLActivity owns the hardware surface. Return to the launcher to start a new game process.
++    _exit(0);
+ #else
+@@ -1280,2 +1287,3 @@ void runtime_restart(void) {
+ #endif
++#endif
+ }
+@@ -1293,4 +1301,8 @@ int main(int argc, char **argv) {
+        non-PIE brk heap, i.e. below 1 TiB: the guest packs pointers into 40 bits. */
++#ifdef __ANDROID__
++    mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, M_HEAP_TAGGING_LEVEL_NONE);
++#else
+     mallopt(M_ARENA_MAX,1);
+     mallopt(M_MMAP_THRESHOLD,32*1024*1024);
++#endif
+     /* The guest CPU allocates the memory the guest may hold pointers to through this (below
