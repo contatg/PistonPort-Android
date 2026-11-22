@@ -55,7 +55,12 @@ jobs:
           "$RUNNER_TEMP/meson/bin/pip" install meson==1.10.1
           echo "$RUNNER_TEMP/meson/bin" >> "$GITHUB_PATH"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
-            "platforms;android-37" "ndk;29.0.14206865" "cmake;3.22.1"
+            "platforms;android-36" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Compile Android UI
+        run: |
+          cd "$RUNNER_TEMP/host"
+          ./gradlew --no-daemon --stacktrace :app:compileLegacyDebugKotlin
 
       - name: Build the Android Linux environment
         run: |
