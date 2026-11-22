@@ -13,7 +13,6 @@ from zipfile import ZipFile
 HERE = Path(__file__).resolve().parent
 PORT = "PistonPort-Android-nixport.zip"
 APPIMAGE = "PistonPort-Android-aarch64.AppImage"
-WINDOWS_RUNTIME = "PistonPort/PistonPort.Runtime/"
 REFERENCE_FILES = {
     "image.json": "image.json",
     "tools/cars3-runtime.elf": "cars3-runtime.elf",
@@ -56,14 +55,22 @@ def extract_runtime(port, work):
 
 def stage_preparer(windows, destination):
     with ZipFile(windows) as archive:
+        names = set(archive.namelist())
+        suffix = "tools/cars3-runtime.elf"
+        candidates = {name[:-len(suffix)] for name in names if name.endswith(suffix)}
+        prefixes = [prefix for prefix in candidates if all(prefix + name in names for name in REFERENCE_FILES)]
+        if len(prefixes) != 1:
+            relevant = sorted(name for name in names if name.endswith(("image.json", ".elf", "link_modules.py")))
+            raise ValueError(f"Could not find the upstream PistonPort preparation files: {relevant[:12]}")
+        prefix, = prefixes
         for source, target in REFERENCE_FILES.items():
-            copy_member(archive, WINDOWS_RUNTIME + source, destination / target)
+            copy_member(archive, prefix + source, destination / target)
         elf = destination / "cars3-runtime.elf"
         with elf.open("rb") as source:
             header = source.read(20)
         if header[:6] != b"\x7fELF\x02\x01" or header[18:20] != b"\x3e\0":
             raise ValueError("The guest bridge must be an x86-64 ELF")
-        library = WINDOWS_RUNTIME + "lib/elftools/"
+        library = prefix + "lib/elftools/"
         for item in archive.infolist():
             if item.is_dir() or not item.filename.startswith(library):
                 continue
@@ -78,7 +85,7 @@ def stage_preparer(windows, destination):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=Path, required=True)
-    parser.add_argument("--windows-tools", type=Path, required=True)
+    parser.add_argument("--preparer", type=Path, required=True)
     parser.add_argument("--payload", type=Path, required=True)
     parser.add_argument("--interpreter", required=True)
     args = parser.parse_args()
@@ -94,7 +101,7 @@ def main():
         for filename in ("app-session.sh", "app_session.py"):
             shutil.copy2(HERE / filename, destination)
         shutil.copy2(HERE.parents[1] / "LICENSE", destination / "LICENSE-PistonPort")
-        stage_preparer(args.windows_tools, destination)
+        shutil.copytree(args.preparer, destination, dirs_exist_ok=True)
         probe = destination / "bin/spartanport-probe"
         subprocess.run(["patchelf", "--set-interpreter", args.interpreter, probe], check=True)
         with tarfile.open(args.payload / "rootfs-arm64.tar", "a") as archive:

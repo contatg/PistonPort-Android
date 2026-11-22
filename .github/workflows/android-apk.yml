@@ -36,6 +36,14 @@ jobs:
           install -D -m 0644 "$GITHUB_WORKSPACE/pistonport/launcher/pistonport.png" "$RUNNER_TEMP/host/app/src/main/res/drawable-nodpi/pistonport.png"
           gh run download 45071467225 --repo "$GITHUB_REPOSITORY" --name PistonPort-Android-ARM64 --dir "$RUNNER_TEMP/arm64"
           gh release download v1.1.4 --repo afkarxyz/PistonPort --pattern PistonPort-Windows-x64.zip --dir "$RUNNER_TEMP/upstream"
+          PYTHONPATH=pistonport/apk python3 - "$RUNNER_TEMP" <<'PY'
+          from pathlib import Path
+          from sys import argv
+          from stage_runtime import stage_preparer
+          temp = Path(argv[1])
+          stage_preparer(temp / "upstream/PistonPort-Windows-x64.zip", temp / "preparer")
+          print("Verified the upstream guest bridge and preparation scripts")
+          PY
 
       - uses: actions/setup-java@v4
         with:
@@ -62,7 +70,14 @@ jobs:
           cd "$RUNNER_TEMP/host"
           ./gradlew --no-daemon --stacktrace :app:compileLegacyDebugKotlin
 
+      - uses: actions/cache/restore@v4
+        id: linux-payload
+        with:
+          path: ${{ runner.temp }}/host/build/payload
+          key: pistonport-linux-v1-${{ env.FEXDROID_SOURCE }}-${{ env.FXD_PACKAGE }}-${{ hashFiles('pistonport/apk/fexdroid.patch') }}
+
       - name: Build the Android Linux environment
+        if: steps.linux-payload.outputs.cache-hit != 'true'
         run: |
           cd "$RUNNER_TEMP/host"
           scripts/build-rootfs.sh
@@ -73,11 +88,17 @@ jobs:
           scripts/build-mesa.sh
           scripts/build-payload.sh
 
+      - uses: actions/cache/save@v4
+        if: steps.linux-payload.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/host/build/payload
+          key: ${{ steps.linux-payload.outputs.cache-primary-key }}
+
       - name: Bundle runtime and build APK
         run: |
           python3 pistonport/apk/stage_runtime.py \
             --port "$RUNNER_TEMP/arm64/PistonPort-Android-nixport.zip" \
-            --windows-tools "$RUNNER_TEMP/upstream/PistonPort-Windows-x64.zip" \
+            --preparer "$RUNNER_TEMP/preparer" \
             --payload "$RUNNER_TEMP/host/build/payload/assets" \
             --interpreter "/data/data/$FXD_PACKAGE/files/rootfs/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1"
           cd "$RUNNER_TEMP/host"
