@@ -1,0 +1,75 @@
+"""Prepare a local game image and start the ARM64 runtime inside the APK."""
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+import prepare
+import run_arm64
+
+RUNTIME = Path(__file__).resolve().parent
+
+
+def image_for(game, profile):
+    prepare.check_game_folder(game)
+    manifest = json.loads((RUNTIME / "image.json").read_text(encoding="utf-8"))
+    signature = hashlib.sha256()
+    for name, expected in manifest["inputs"].items():
+        with (game / name).open("rb") as source:
+            actual = hashlib.file_digest(source, "sha256").hexdigest()
+        if actual != expected:
+            raise ValueError(f"Arquivo incompatível com CUSA07027 v01.00: {name}")
+        signature.update(bytes.fromhex(actual))
+    signature.update(bytes.fromhex(manifest["image_sha256"]))
+    image = profile / f"cars3-540p-{signature.hexdigest()[:16]}.bin"
+    if image.is_file():
+        return image
+
+    print("Preparando o jogo em 540p…", flush=True)
+    with tempfile.TemporaryDirectory(dir=profile) as directory:
+        working = Path(directory)
+        linked = prepare.prepare(game, RUNTIME / "upstream", None, working, None,
+                                 prebuilt=RUNTIME / "cars3-runtime.elf")
+        with linked.open("rb") as source:
+            actual = hashlib.file_digest(source, "sha256").hexdigest()
+        if actual != manifest["image_sha256"]:
+            raise ValueError("A imagem gerada não corresponde à revisão esperada.")
+        prepare.apply_graphics_patches(
+            linked, image, resolution="540p", shadow_resolution=512,
+            skip_intro=True, bloom=False,
+        )
+    return image
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("mode", choices=("game", "vulkan"))
+    parser.add_argument("game", nargs="?", type=Path)
+    args = parser.parse_args()
+    profile = Path(os.environ["FXD_FILES"]) / "pistonport"
+    launch = ["--probe", str(RUNTIME / "bin/spartanport-probe"), "--profile", str(profile)]
+    if args.mode == "vulkan":
+        result = run_arm64.main([*launch, "--check-vulkan"])
+        log = profile / "vulkan-last.log"
+    else:
+        if args.game is None:
+            parser.error("Selecione a pasta do jogo primeiro.")
+        image = image_for(args.game.resolve(), profile)
+        result = run_arm64.main([*launch, "--image", str(image), "--game", str(args.game)])
+        log = profile / "native-last.log"
+    if log.is_file():
+        with log.open("rb") as source:
+            source.seek(max(0, log.stat().st_size - 8192))
+            print(source.read().decode("utf-8", errors="replace"))
+    return result
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, ValueError) as error:
+        sys.exit(str(error))

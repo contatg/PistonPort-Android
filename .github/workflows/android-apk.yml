@@ -1,0 +1,101 @@
+name: PistonPort standalone APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/android-apk.yml
+      - pistonport/apk/**
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 140
+    env:
+      FXD_PACKAGE: org.pistonport.android
+      FEXDROID_SOURCE: 410bba28cf2f55e08fd9588266524106387ea67c
+      ANDROID_NDK: /usr/local/lib/android/sdk/ndk/29.0.14206865
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Fetch the host and verified ARM64 executable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git clone --quiet https://github.com/cobrabm12/fexdroid.git "$RUNNER_TEMP/host"
+          git -C "$RUNNER_TEMP/host" checkout --quiet --detach "$FEXDROID_SOURCE"
+          path="$GITHUB_WORKSPACE/pistonport/apk"
+          git -C "$RUNNER_TEMP/host" apply "$path/fexdroid.patch"
+          install -m 0644 "$path/PistonHome.kt" "$RUNNER_TEMP/host/app/src/main/java/ro/cobrabm/fexdroid/PistonHome.kt"
+          install -D -m 0644 "$GITHUB_WORKSPACE/pistonport/launcher/pistonport.png" "$RUNNER_TEMP/host/app/src/main/res/drawable-nodpi/pistonport.png"
+          gh run download 45071467225 --repo "$GITHUB_REPOSITORY" --name PistonPort-Android-ARM64 --dir "$RUNNER_TEMP/arm64"
+          gh release download v1.1.4 --repo afkarxyz/PistonPort --pattern PistonPort-Windows-x64.zip --dir "$RUNNER_TEMP/upstream"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang lld llvm ninja-build python3-venv patchelf squashfs-tools \
+            bison flex file glslang-tools pkg-config python3-mako python3-yaml python3-packaging zstd
+          python3 -m venv --system-site-packages "$RUNNER_TEMP/meson"
+          "$RUNNER_TEMP/meson/bin/pip" install meson==1.10.1
+          echo "$RUNNER_TEMP/meson/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "platforms;android-37" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Build the Android Linux environment
+        run: |
+          cd "$RUNNER_TEMP/host"
+          scripts/build-rootfs.sh
+          glibc=$(awk '$1 == "libc6" { print $2; exit }' build/rootfs/rootfs-arm64.packages.txt)
+          test -n "$glibc"
+          sed -i "s/^GLIBC_DEB_VERSION=.*/GLIBC_DEB_VERSION=\"$glibc\"/" scripts/config.sh
+          scripts/build-glibc.sh
+          scripts/build-mesa.sh
+          scripts/build-payload.sh
+
+      - name: Bundle runtime and build APK
+        run: |
+          python3 pistonport/apk/stage_runtime.py \
+            --port "$RUNNER_TEMP/arm64/PistonPort-Android-nixport.zip" \
+            --windows-tools "$RUNNER_TEMP/upstream/PistonPort-Windows-x64.zip" \
+            --payload "$RUNNER_TEMP/host/build/payload/assets" \
+            --interpreter "/data/data/$FXD_PACKAGE/files/rootfs/usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1"
+          cd "$RUNNER_TEMP/host"
+          ./gradlew --no-daemon --stacktrace :app:assembleLegacyDebug
+          apk=app/build/outputs/apk/legacy/debug/app-legacy-debug.apk
+          apksigner=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
+          "$apksigner" verify --verbose "$apk"
+          python3 - "$apk" <<'PY'
+          from sys import argv
+          from zipfile import ZipFile
+          with ZipFile(argv[1]) as package:
+              files = set(package.namelist())
+              assert {"AndroidManifest.xml", "classes.dex", "assets/rootfs-arm64.tar", "assets/payload.json"} <= files
+              assert any(name.startswith("lib/arm64-v8a/") and name.endswith(".so") for name in files)
+          PY
+          mkdir "$RUNNER_TEMP/apk"
+          cp "$apk" "$RUNNER_TEMP/apk/PistonPort-Android-arm64.apk"
+          cd "$RUNNER_TEMP/apk"
+          sha256sum PistonPort-Android-arm64.apk > PistonPort-Android-arm64.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PistonPort-Standalone-APK
+          path: ${{ runner.temp }}/apk/PistonPort-Android-arm64.apk*
+          if-no-files-found: error
+          compression-level: 0
