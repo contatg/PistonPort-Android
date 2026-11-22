@@ -14,9 +14,9 @@ import run_arm64
 RUNTIME = Path(__file__).resolve().parent
 
 
-def image_for(game, profile):
+def image_for(game, profile, resources=RUNTIME, link_boot=None):
     prepare.check_game_folder(game)
-    manifest = json.loads((RUNTIME / "image.json").read_text(encoding="utf-8"))
+    manifest = json.loads((resources / "image.json").read_text(encoding="utf-8"))
     signature = hashlib.sha256()
     for name, expected in manifest["inputs"].items():
         with (game / name).open("rb") as source:
@@ -32,8 +32,8 @@ def image_for(game, profile):
     print("Preparando o jogo em 540p…", flush=True)
     with tempfile.TemporaryDirectory(dir=profile) as directory:
         working = Path(directory)
-        linked = prepare.prepare(game, RUNTIME / "upstream", None, working, None,
-                                 prebuilt=RUNTIME / "cars3-runtime.elf")
+        linked = prepare.prepare(game, resources / "upstream", None, working, None,
+                                 prebuilt=resources / "cars3-runtime.elf", link_boot=link_boot)
         with linked.open("rb") as source:
             actual = hashlib.file_digest(source, "sha256").hexdigest()
         if actual != manifest["image_sha256"]:

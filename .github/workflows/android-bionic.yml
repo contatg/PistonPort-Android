@@ -6,6 +6,9 @@ on:
     paths:
       - .github/workflows/android-bionic.yml
       - pistonport/native-android/**
+      - pistonport/prepare.py
+      - pistonport/apk/app_session.py
+      - pistonport/apk/stage_runtime.py
 
 permissions:
   contents: read
@@ -131,7 +134,6 @@ jobs:
             fi
           done
 
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -140,6 +142,33 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Stage the Carros 3 preparation tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/piston-preparer"
+          gh release download v1.1.4 --repo afkarxyz/PistonPort --pattern PistonPort-Windows-x64.zip --dir "$RUNNER_TEMP/piston-preparer"
+          PYTHONPATH=pistonport/apk python3 - "$RUNNER_TEMP/piston-preparer" <<'PYTHON'
+          from pathlib import Path
+          from sys import argv
+          from stage_runtime import stage_preparer
+          base = Path(argv[1])
+          stage_preparer(base / "PistonPort-Windows-x64.zip", base / "extracted")
+          PYTHON
+          extracted="$RUNNER_TEMP/piston-preparer/extracted"
+          project=pistonport/native-android/app/src/main
+          mkdir -p "$project/assets" "$project/python/spartanprep"
+          cp "$extracted/"{image.json,cars3-runtime.elf} "$project/assets/"
+          cp "$extracted/upstream/scripts/"*.py "$project/python/spartanprep/"
+          touch "$project/python/spartanprep/__init__.py"
+          sed -i -E 's/^from (prepare|link_libc) import /from .\1 import /' "$project/python/spartanprep/"*.py
+          cp -R "$extracted/lib/python/elftools" "$project/python/"
+          cp pistonport/{prepare.py,run_arm64.py} pistonport/apk/app_session.py "$project/python/"
 
       - name: Package and verify the native APK
         run: |
@@ -165,7 +194,7 @@ jobs:
               files = set(apk.namelist())
               expected = {"libpistonport.so", "libgportcpu.so", "libSDL3.so", "libc++_shared.so"}
               assert {f"lib/arm64-v8a/{name}" for name in expected} <= files
-              assert {"AndroidManifest.xml", "classes.dex"} <= files
+              assert {"AndroidManifest.xml", "classes.dex", "assets/image.json", "assets/cars3-runtime.elf"} <= files
               assert all(not name.startswith("assets/rootfs") for name in files)
           PYTHON
           install -Dm644 "$apk" "$RUNNER_TEMP/piston-apk/PistonPort-Android-Native-arm64.apk"

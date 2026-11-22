@@ -5,7 +5,6 @@ import hashlib
 import math
 import os
 import struct
-import subprocess
 import sys
 from pathlib import Path
 
@@ -448,16 +447,21 @@ def check_game_folder(game):
     check_eboot(game)
 
 
-def prepare(game, reference, llvm, out, shad, prebuilt=None):
+def prepare(game, reference, llvm, out, shad, prebuilt=None, link_boot=None):
     from elftools.elf.elffile import ELFFile
 
     check_eboot(game)
     out.mkdir(parents=True, exist_ok=True)
-    for tool in ("prepare.py", "link_modules.py"):
-        command = [sys.executable, reference / "scripts" / tool, game, "--out", out]
-        if tool == "link_modules.py":
-            command += ["--modules", *LINK_MODULES]
-        subprocess.run(command, check=True)
+    if link_boot is None:
+        import subprocess
+
+        for tool in ("prepare.py", "link_modules.py"):
+            command = [sys.executable, reference / "scripts" / tool, game, "--out", out]
+            if tool == "link_modules.py":
+                command += ["--modules", *LINK_MODULES]
+            subprocess.run(command, check=True)
+    else:
+        link_boot(game, out)
     source = Path(__file__).resolve().parent
     original = (out / "boot-linked.bin").read_bytes()
     header = struct.Struct("<8s6Q")
@@ -478,6 +482,8 @@ def prepare(game, reference, llvm, out, shad, prebuilt=None):
     if prebuilt is not None:
         elf = prebuilt
     else:
+        import subprocess
+
         from fibers import compile_fibers
 
         tool_suffix = ".exe" if os.name == "nt" else ""

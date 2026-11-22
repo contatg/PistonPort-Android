@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application") version "8.13.2"
     id("org.jetbrains.kotlin.android") version "2.2.21"
+    id("com.chaquo.python") version "17.0.0"
 }
 android {
     namespace = "org.pistonport.nativeandroid"
@@ -17,4 +18,10 @@ android {
     sourceSets["main"].java.srcDir(layout.buildDirectory.dir("sdl-java"))
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("native-libs"))
     packaging { jniLibs { useLegacyPackaging = false } }
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.13"
+    }
 }

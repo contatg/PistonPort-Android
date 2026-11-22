@@ -2,6 +2,7 @@ package org.pistonport.nativeandroid
 
 import android.Manifest
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -10,7 +11,8 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import java.io.DataInputStream
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
 import java.io.File
 import ro.cobrabm.fexdroid.PistonSource
 
@@ -20,6 +22,7 @@ class HomeActivity : Activity() {
     private lateinit var play: Button
     private lateinit var select: Button
     private var selecting = false
+    private var preparing = false
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -49,15 +52,30 @@ class HomeActivity : Activity() {
             text = "Jogar"
             setOnClickListener {
                 val folder = PistonSource.current(filesDir) ?: return@setOnClickListener
-                val image = bootImage(folder) ?: return@setOnClickListener
-                startActivity(Intent(this@HomeActivity, GameActivity::class.java)
-                    .putExtra("folder", folder.path).putExtra("image", image.path))
+                preparing = true
+                refresh()
+                Thread {
+                    val image = runCatching { NativeBoot.prepare(applicationContext, folder) }
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        preparing = false
+                        refresh()
+                        image.onSuccess { path ->
+                            startActivity(Intent(this, GameActivity::class.java)
+                                .putExtra("folder", folder.path).putExtra("image", path))
+                        }.onFailure { error ->
+                            status.text = error.message ?: "Falha ao preparar a imagem do jogo."
+                        }
+                    }
+                }.start()
             }
         }
         column.addView(play)
         column.addView(Button(this).apply {
             text = "Testar Vulkan"
-            setOnClickListener { startActivity(Intent(this@HomeActivity, GameActivity::class.java)) }
+            setOnClickListener {
+                if (!preparing) startActivity(Intent(this@HomeActivity, GameActivity::class.java))
+            }
         })
         diagnostics = TextView(this).apply { textIsSelectable = true }
         column.addView(diagnostics)
@@ -71,14 +89,13 @@ class HomeActivity : Activity() {
 
     private fun refresh() {
         val folder = PistonSource.current(filesDir)
-        val prepared = folder?.let(::bootImage)
-        select.isEnabled = !selecting
-        play.isEnabled = !selecting && prepared != null
+        select.isEnabled = !selecting && !preparing
+        play.isEnabled = !selecting && !preparing && folder != null
         status.text = when {
+            preparing -> "Preparando a inicialização do jogo…"
             selecting -> "Verificando a pasta do jogo…"
             folder == null -> "Selecione a pasta extraída CUSA07027 v01.00 que contém eboot.bin."
-            prepared == null -> "Pasta selecionada. Coloque o arquivo cars3-arm64-low.bin preparado pelo PistonPort do PC nesta pasta."
-            else -> "Pasta pronta para iniciar."
+            else -> "Pasta selecionada. Os arquivos do jogo serão lidos no local."
         }
         diagnostics.text = runCatching {
             GameActivity.logFile(this).inputStream().use { stream ->
@@ -117,15 +134,24 @@ class HomeActivity : Activity() {
         }.start()
     }
 
-    private fun bootImage(folder: File): File? = runCatching {
-        val file = File(folder, "cars3-arm64-low.bin")
-        val magic = ByteArray(8)
-        DataInputStream(file.inputStream()).use { it.readFully(magic) }
-        file.takeIf { magic.decodeToString() == "G3PROBE5" }
-    }.getOrNull()
-
     private companion object {
         const val STORAGE = 1
         const val PICK_FOLDER = 2
+    }
+}
+
+private object NativeBoot {
+    @Synchronized
+    fun prepare(context: Context, folder: File): String {
+        val recipe = File(context.filesDir, "piston-recipes").apply { mkdirs() }
+        val profile = File(context.filesDir, "pistonport").apply { mkdirs() }
+        for (name in listOf("image.json", "cars3-runtime.elf")) {
+            context.assets.open(name).use { input ->
+                File(recipe, name).outputStream().use { output -> input.copyTo(output) }
+            }
+        }
+        if (!Python.isStarted()) Python.start(AndroidPlatform(context))
+        return Python.getInstance().getModule("native_boot")
+            .callAttr("build", folder.path, profile.path, recipe.path).toString()
     }
 }
