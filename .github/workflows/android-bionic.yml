@@ -62,10 +62,22 @@ jobs:
           ! "$readelf" -d "$lib" | grep -E 'libc\.so\.6|libstdc\+\+\.so\.6|ld-linux'
           "$readelf" --dyn-syms --wide "$lib" | grep -E 'gport_guest_cpu_call$'
 
-      - name: Build Android graphics and media dependencies
+      - name: Install graphics build tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends glslang-tools libboost-dev robin-map-dev
+          sudo apt-get install -y --no-install-recommends ccache glslang-tools libboost-dev robin-map-dev
+
+      - uses: actions/cache/restore@v4
+        id: graphics-deps
+        with:
+          path: |
+            ${{ runner.temp }}/bionic-deps/.local-deps/android/bionic-prefix
+            ${{ runner.temp }}/bionic-deps/.local-deps/android/bionic-src/SDL3-3.2.10/android-project
+          key: piston-bionic-deps-v1-${{ runner.os }}-${{ env.BIONIC_DEPS_REF }}-${{ env.NDK_VERSION }}-${{ env.ANDROID_API }}
+
+      - name: Build Android graphics and media dependencies
+        if: steps.graphics-deps.outputs.cache-hit != 'true'
+        run: |
           deps="$RUNNER_TEMP/bionic-deps"
           git init "$deps"
           git -C "$deps" remote add origin https://github.com/niilo/gow3_android.git
@@ -77,6 +89,20 @@ jobs:
           sed -i 's/taskset -c 2-23 nice -n 19 "\$@"/"\$@"/' "$script"
           GOW3_NDK="$ANDROID_HOME/ndk/$NDK_VERSION" GOW3_ANDROID_API="$ANDROID_API" GOW3_JOBS=4 bash "$script"
           cp "$vma/include/vk_mem_alloc.h" "$deps/.local-deps/android/bionic-prefix/include/"
+
+      - uses: actions/cache/save@v4
+        if: steps.graphics-deps.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ${{ runner.temp }}/bionic-deps/.local-deps/android/bionic-prefix
+            ${{ runner.temp }}/bionic-deps/.local-deps/android/bionic-src/SDL3-3.2.10/android-project
+          key: ${{ steps.graphics-deps.outputs.cache-primary-key }}
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: piston-bionic-ccache-${{ runner.os }}-${{ env.NDK_VERSION }}-${{ github.sha }}
+          restore-keys: piston-bionic-ccache-${{ runner.os }}-${{ env.NDK_VERSION }}-
 
       - name: Link the native game and Vulkan renderer
         run: |
@@ -105,12 +131,19 @@ jobs:
           cmake -S "$src/gpu" -B "$RUNNER_TEMP/bionic-game" -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM="android-$ANDROID_API" -DANDROID_STL=c++_shared \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=Release -DSPARTAN_PGO=off -DSPARTAN_LTO=OFF -DSPARTAN_ARM=ON \
             -DCMAKE_PREFIX_PATH="$prefix" -DCMAKE_FIND_ROOT_PATH="$prefix" \
             -DBoost_DIR="$prefix/lib/cmake/Boost" -Dtsl-robin-map_DIR="$prefix/lib/cmake/tsl-robin-map" \
             -DVMA_INCLUDE_DIR="$prefix/include" \
             -DSPARTAN_ANDROID_CPU="$RUNNER_TEMP/bionic-cpu/libgportcpu.so"
           cmake --build "$RUNNER_TEMP/bionic-game" --target pistonport --parallel 4
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ~/.cache/ccache
+          key: piston-bionic-ccache-${{ runner.os }}-${{ env.NDK_VERSION }}-${{ github.sha }}
 
       - name: Verify and stage the native Android libraries
         run: |
