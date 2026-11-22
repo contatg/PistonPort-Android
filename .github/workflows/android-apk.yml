@@ -1,7 +1,12 @@
-name: PistonPort standalone APK
+name: PistonPort Android launcher checks
 
 on:
   workflow_dispatch:
+    inputs:
+      build_legacy_apk:
+        description: Bundle the historical Linux-based APK
+        type: boolean
+        default: false
   push:
     paths:
       - .github/workflows/android-apk.yml
@@ -24,9 +29,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Fetch the host and verified ARM64 executable
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Fetch the Android launcher host
         run: |
           git clone --quiet https://github.com/cobrabm12/fexdroid.git "$RUNNER_TEMP/host"
           git -C "$RUNNER_TEMP/host" checkout --quiet --detach "$FEXDROID_SOURCE"
@@ -34,6 +37,12 @@ jobs:
           git -C "$RUNNER_TEMP/host" apply "$path/fexdroid.patch"
           install -m 0644 "$path/PistonHome.kt" "$RUNNER_TEMP/host/app/src/main/java/ro/cobrabm/fexdroid/PistonHome.kt"
           install -D -m 0644 "$GITHUB_WORKSPACE/pistonport/launcher/pistonport.png" "$RUNNER_TEMP/host/app/src/main/res/drawable-nodpi/pistonport.png"
+
+      - name: Fetch the legacy executable and game preparer
+        if: inputs.build_legacy_apk
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
           gh run download 45071467225 --repo "$GITHUB_REPOSITORY" --name PistonPort-Android-ARM64 --dir "$RUNNER_TEMP/arm64"
           gh release download v1.1.4 --repo afkarxyz/PistonPort --pattern PistonPort-Windows-x64.zip --dir "$RUNNER_TEMP/upstream"
           PYTHONPATH=pistonport/apk python3 - "$RUNNER_TEMP" <<'PY'
@@ -50,11 +59,20 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Compile Android UI
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "platforms;android-36" "ndk;29.0.14206865" "cmake;3.22.1"
+          cd "$RUNNER_TEMP/host"
+          ./gradlew --no-daemon --stacktrace :app:compileLegacyDebugKotlin
+
       - uses: docker/setup-qemu-action@v3
+        if: inputs.build_legacy_apk
         with:
           platforms: arm64
 
-      - name: Install build tools
+      - name: Install legacy build tools
+        if: inputs.build_legacy_apk
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends clang lld llvm ninja-build python3-venv patchelf squashfs-tools \
@@ -62,22 +80,16 @@ jobs:
           python3 -m venv --system-site-packages "$RUNNER_TEMP/meson"
           "$RUNNER_TEMP/meson/bin/pip" install meson==1.10.1
           echo "$RUNNER_TEMP/meson/bin" >> "$GITHUB_PATH"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
-            "platforms;android-36" "ndk;29.0.14206865" "cmake;3.22.1"
-
-      - name: Compile Android UI
-        run: |
-          cd "$RUNNER_TEMP/host"
-          ./gradlew --no-daemon --stacktrace :app:compileLegacyDebugKotlin
 
       - uses: actions/cache/restore@v4
+        if: inputs.build_legacy_apk
         id: linux-payload
         with:
           path: ${{ runner.temp }}/host/build/payload
           key: pistonport-linux-v1-${{ env.FEXDROID_SOURCE }}-${{ env.FXD_PACKAGE }}-${{ hashFiles('pistonport/apk/fexdroid.patch') }}
 
       - name: Build the Android Linux environment
-        if: steps.linux-payload.outputs.cache-hit != 'true'
+        if: inputs.build_legacy_apk && steps.linux-payload.outputs.cache-hit != 'true'
         run: |
           cd "$RUNNER_TEMP/host"
           scripts/build-rootfs.sh
@@ -89,12 +101,13 @@ jobs:
           scripts/build-payload.sh
 
       - uses: actions/cache/save@v4
-        if: steps.linux-payload.outputs.cache-hit != 'true'
+        if: inputs.build_legacy_apk && steps.linux-payload.outputs.cache-hit != 'true'
         with:
           path: ${{ runner.temp }}/host/build/payload
           key: ${{ steps.linux-payload.outputs.cache-primary-key }}
 
       - name: Bundle runtime and build APK
+        if: inputs.build_legacy_apk
         run: |
           python3 pistonport/apk/stage_runtime.py \
             --port "$RUNNER_TEMP/arm64/PistonPort-Android-nixport.zip" \
@@ -120,6 +133,7 @@ jobs:
           sha256sum PistonPort-Android-arm64.apk > PistonPort-Android-arm64.apk.sha256
 
       - uses: actions/upload-artifact@v4
+        if: inputs.build_legacy_apk
         with:
           name: PistonPort-Standalone-APK
           path: ${{ runner.temp }}/apk/PistonPort-Android-arm64.apk*

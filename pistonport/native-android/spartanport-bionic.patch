@@ -1,0 +1,49 @@
+diff --git a/cpu/bionic_compat.h b/cpu/bionic_compat.h
+new file mode 100644
+index 0000000..e9c02b7
+--- /dev/null
++++ b/cpu/bionic_compat.h
+@@ -0,0 +1,16 @@
++// Adapted from niilo/gow3_android, cpu/bionic_compat.h, GPL-3.0.
++// Included by the FEX build. Bionic has no libc wrapper for getdents64.
++#pragma once
++
++#if defined(__cplusplus) && defined(__ANDROID__)
++#include <dirent.h>
++#include <sys/syscall.h>
++#include <sys/types.h>
++#include <unistd.h>
++
++inline ssize_t gport_getdents64(int fd, void* entries, size_t size) {
++    return syscall(__NR_getdents64, fd, entries, size);
++}
++
++#define getdents64 gport_getdents64
++#endif
+diff --git a/cpu/fex_project.cmake b/cpu/fex_project.cmake
+index 7f3639a..27eec11 100644
+--- a/cpu/fex_project.cmake
++++ b/cpu/fex_project.cmake
+@@ -4 +4,8 @@
+ cmake_language(EVAL CODE "cmake_language(DEFER DIRECTORY \"${CMAKE_SOURCE_DIR}\" CALL include \"${CMAKE_CURRENT_LIST_DIR}/gportcpu.cmake\")")
++
++# FEX's platform checks expect Linux for this kernel. The NDK still supplies Bionic.
++if(ANDROID AND CMAKE_SYSTEM_NAME STREQUAL "Android")
++  set(CMAKE_SYSTEM_NAME Linux)
++  add_compile_definitions(_GNU_SOURCE)
++  add_compile_options("-include" "${CMAKE_CURRENT_LIST_DIR}/bionic_compat.h")
++endif()
+diff --git a/cpu/gportcpu.cmake b/cpu/gportcpu.cmake
+index 175f324..b21b098 100644
+--- a/cpu/gportcpu.cmake
++++ b/cpu/gportcpu.cmake
+@@ -13 +13,9 @@ set_target_properties(gportcpu PROPERTIES
+   VISIBILITY_INLINES_HIDDEN TRUE)
++
++if(ANDROID)
++  # This embedded runtime does not use FEXServer. Its client requires a
++  # noexcept std::function assignment that libc++ does not provide.
++  get_target_property(gport_common_sources Common SOURCES)
++  list(FILTER gport_common_sources EXCLUDE REGEX "FEXServerClient\\.cpp$")
++  set_target_properties(Common PROPERTIES SOURCES "${gport_common_sources}")
++endif()
