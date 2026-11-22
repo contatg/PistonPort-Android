@@ -1,5 +1,5 @@
 diff --git a/packaging/arm-linux/build.sh b/packaging/arm-linux/build.sh
-index 3c9c52f..9eae27a 100755
+index 3c9c52f..57d40f1 100755
 --- a/packaging/arm-linux/build.sh
 +++ b/packaging/arm-linux/build.sh
 @@ -38,2 +38,7 @@ if [[ ! -d $sysroot/usr/lib/aarch64-linux-gnu ]]; then
@@ -10,23 +10,29 @@ index 3c9c52f..9eae27a 100755
 +    ln -s usr/include "$sysroot/include"
 +fi
  headers=${SPARTAN_ARM64_HEADERS:-}
-@@ -107,3 +112,4 @@ spartan_nixport=ON
+@@ -73,2 +78,5 @@ command -v ld.lld >/dev/null 2>&1 || die 'need ld.lld (brew install lld)'
+ boost_dir=${SPARTAN_BOOST_DIR:-}
++if [[ -z $boost_dir && -f $headers/share/cmake/Boost/BoostConfig.cmake ]]; then
++    boost_dir="$headers/share/cmake/Boost"
++fi
+ if [[ -z $boost_dir ]]; then
+@@ -107,3 +115,4 @@ spartan_nixport=ON
  begin "FEXCore + libgportcpu.so"
 -if [[ ! -f $out/fex/build.ninja ]]; then
 +fex_tune_arch=${SPARTAN_FEX_TUNE_ARCH:-armv8.2-a}
 +if [[ ! -f $out/fex/build.ninja ]] || ! grep -Fxq "TUNE_ARCH:STRING=$fex_tune_arch" "$out/fex/CMakeCache.txt"; then
      cmake -S third_party/FEX -B "$out/fex" -G Ninja -DCMAKE_TOOLCHAIN_FILE="$tc" \
-@@ -111,3 +117,3 @@ if [[ ! -f $out/fex/build.ninja ]]; then
+@@ -111,3 +120,3 @@ if [[ ! -f $out/fex/build.ninja ]]; then
          -DBUILD_TESTING=OFF -DBUILD_THUNKS=OFF -DBUILD_FEXCONFIG=OFF -DBUILD_STEAM_SUPPORT=OFF \
 -        -DBUILD_FEX_LINUX_TESTS=OFF -DENABLE_ZYDIS=OFF -DTUNE_ARCH=armv8.2-a -DTUNE_CPU=generic >/dev/null
 +        -DBUILD_FEX_LINUX_TESTS=OFF -DENABLE_ZYDIS=OFF -DTUNE_ARCH="$fex_tune_arch" -DTUNE_CPU=generic >/dev/null
  fi
-@@ -165,3 +171,3 @@ install -m755 "$out/fex/libgportcpu.so" "$out/bin/gpu/"
+@@ -165,3 +174,3 @@ install -m755 "$out/fex/libgportcpu.so" "$out/bin/gpu/"
  begin "rust launcher (optional)"
 -if command -v cargo >/dev/null 2>&1; then
 +if [[ ${SPARTAN_APPDIR_ONLY:-0} != 1 ]] && command -v cargo >/dev/null 2>&1; then
      bash launcher-rust/build-aarch64.sh
-@@ -275,2 +281,8 @@ done
+@@ -275,2 +284,8 @@ done
 
 +# Leave an unpacked runtime for external ports to stage their own entry point.
 +if [[ ${SPARTAN_APPDIR_ONLY:-0} == 1 ]]; then
@@ -35,3 +41,49 @@ index 3c9c52f..9eae27a 100755
 +fi
 +
  # verb 冒烟（无设备：config/info 走 python，stdout 必须是合法 JSON）
+diff --git a/packaging/arm-linux/ci-deps.sh b/packaging/arm-linux/ci-deps.sh
+index 145df82..278e737 100755
+--- a/packaging/arm-linux/ci-deps.sh
++++ b/packaging/arm-linux/ci-deps.sh
+@@ -38,18 +38,19 @@ fi
+ # tsl-robin-map 的 cmake 包时，自己写一份最简的（纯头文件库，一个接口目标就够）。
+-tsl_dir=$(find /usr/lib /usr/local/lib -maxdepth 4 -type d -name 'tsl-robin-map' -path '*cmake*' 2>/dev/null | head -n 1)
+-if [[ -z $tsl_dir ]]; then
+-    [[ -f /usr/include/tsl/robin_map.h ]] || die "tsl-robin-map headers missing (apt robin-map-dev)"
+-    tsl_dir="$prefix/share/cmake/tsl-robin-map"
+-    mkdir -p "$tsl_dir"
+-    cat > "$tsl_dir/tsl-robin-mapConfig.cmake" <<'CMAKE'
+-# 手写的最简 cmake 包：tsl-robin-map 是纯头文件库（Ubuntu 的 robin-map-dev 装在
+-# /usr/include/tsl），发行版不带 cmake 配置，这里补一个接口目标。
+-if(NOT TARGET tsl::robin_map)
+-    add_library(tsl::robin_map INTERFACE IMPORTED)
+-    set_target_properties(tsl::robin_map PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "/usr/include")
++# Stage header-only packages outside /usr/include so target libc headers take precedence.
++for package in tsl boost; do
++    [[ -d /usr/include/$package ]] || die "headers missing: $package"
++    cp -R "/usr/include/$package" "$prefix/include/"
++done
++for entry in 'tsl-robin-map tsl::robin_map' 'Boost Boost::headers'; do
++    read -r package target <<< "$entry"
++    config="$prefix/share/cmake/$package"
++    mkdir -p "$config"
++    cat > "$config/${package}Config.cmake" <<CMAKE
++if(NOT TARGET $target)
++    add_library($target INTERFACE IMPORTED)
++    set_target_properties($target PROPERTIES
++        INTERFACE_INCLUDE_DIRECTORIES "\${CMAKE_CURRENT_LIST_DIR}/../../../include")
+ endif()
+-set(tsl-robin-map_FOUND TRUE)
+ CMAKE
+-fi
+-echo "tsl-robin-map: $tsl_dir"
++done
+
+@@ -62,7 +63,2 @@ fi
+
+-# ---- Boost 的 cmake 目录（build.sh 用 Boost_DIR 找它）---------------------------------
+-boost_dir=$(find /usr/lib /usr/local/lib -maxdepth 3 -type d -name 'Boost-*' -path '*/cmake/*' 2>/dev/null | sort | tail -n 1)
+-[[ -n $boost_dir ]] || die "boost cmake dir not found (apt libboost-dev)"
+-echo "SPARTAN_BOOST_DIR=$boost_dir"
+-
+ echo "ci-deps: ready (headers: $prefix)"
