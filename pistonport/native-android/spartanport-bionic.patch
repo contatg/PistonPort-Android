@@ -4,7 +4,7 @@ index 0000000..e9c02b7
 --- /dev/null
 +++ b/cpu/bionic_compat.h
 @@ -0,0 +1,16 @@
-+// Adapted from niilo/gow3_android, cpu/bionic_compat.h, GPL-3.0.
++// Adapted from niilo/gow3_android, cpu/bionic_compat.h, GPL-2.0.
 +// Included by the FEX build. Bionic has no libc wrapper for getdents64.
 +#pragma once
 +
