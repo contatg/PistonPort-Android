@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 TARGET_HASH = "56d27cc83b7fe34921fb07413dd7c8fb255daf357a3f81c2d882969f001ff654"
+LINK_MODULES = ("libc.prx", "libSceFios2.prx", "libSceNpToolkit2.prx")
 RESOLUTIONS = {
     "540p": (960, 540),
     "720p": (1280, 720),
@@ -425,21 +426,37 @@ def apply_graphics_patches(
     return output_path
 
 
+def check_eboot(game):
+    digest = hashlib.sha256()
+    with (game / "eboot.bin").open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != TARGET_HASH:
+        raise ValueError("Unsupported eboot.bin. This profile targets CUSA07027 v01.00.")
+
+
+def check_game_folder(game):
+    if game.is_file() and game.suffix.lower() == ".pkg":
+        raise ValueError("Android requires an extracted game folder. Select the folder containing eboot.bin.")
+    for name in ("assets", "bundles"):
+        if not (game / name).is_dir():
+            raise ValueError(f"Missing game directory: {name}/")
+    for name in ("eboot.bin", "sce_sys/param.sfo", *(f"sce_module/{module}" for module in LINK_MODULES)):
+        path = game / name
+        if not path.is_file() or path.stat().st_size == 0:
+            raise ValueError(f"Missing or empty game file: {name}")
+    check_eboot(game)
+
+
 def prepare(game, reference, llvm, out, shad, prebuilt=None):
     from elftools.elf.elffile import ELFFile
 
-    if hashlib.sha256((game / "eboot.bin").read_bytes()).hexdigest() != TARGET_HASH:
-        raise ValueError("Unsupported eboot.bin. This profile targets CUSA07027 01.00.")
+    check_eboot(game)
     out.mkdir(parents=True, exist_ok=True)
     for tool in ("prepare.py", "link_modules.py"):
         command = [sys.executable, reference / "scripts" / tool, game, "--out", out]
         if tool == "link_modules.py":
-            command += [
-                "--modules",
-                "libc.prx",
-                "libSceFios2.prx",
-                "libSceNpToolkit2.prx",
-            ]
+            command += ["--modules", *LINK_MODULES]
         subprocess.run(command, check=True)
     source = Path(__file__).resolve().parent
     original = (out / "boot-linked.bin").read_bytes()

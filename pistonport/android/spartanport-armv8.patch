@@ -1,0 +1,24 @@
+diff --git a/packaging/arm-linux/build.sh b/packaging/arm-linux/build.sh
+index 3c9c52f..4bb8400 100755
+--- a/packaging/arm-linux/build.sh
++++ b/packaging/arm-linux/build.sh
+@@ -107,3 +107,4 @@ spartan_nixport=ON
+ begin "FEXCore + libgportcpu.so"
+-if [[ ! -f $out/fex/build.ninja ]]; then
++fex_tune_arch=${SPARTAN_FEX_TUNE_ARCH:-armv8.2-a}
++if [[ ! -f $out/fex/build.ninja ]] || ! grep -Fxq "TUNE_ARCH:STRING=$fex_tune_arch" "$out/fex/CMakeCache.txt"; then
+     cmake -S third_party/FEX -B "$out/fex" -G Ninja -DCMAKE_TOOLCHAIN_FILE="$tc" \
+@@ -111,3 +112,3 @@ if [[ ! -f $out/fex/build.ninja ]]; then
+         -DBUILD_TESTING=OFF -DBUILD_THUNKS=OFF -DBUILD_FEXCONFIG=OFF -DBUILD_STEAM_SUPPORT=OFF \
+-        -DBUILD_FEX_LINUX_TESTS=OFF -DENABLE_ZYDIS=OFF -DTUNE_ARCH=armv8.2-a -DTUNE_CPU=generic >/dev/null
++        -DBUILD_FEX_LINUX_TESTS=OFF -DENABLE_ZYDIS=OFF -DTUNE_ARCH="$fex_tune_arch" -DTUNE_CPU=generic >/dev/null
+ fi
+@@ -275,2 +276,8 @@ done
+
++# Leave an unpacked runtime for external ports to stage their own entry point.
++if [[ ${SPARTAN_APPDIR_ONLY:-0} == 1 ]]; then
++    end_stage "$appdir"
++    exit 0
++fi
++
+ # verb 冒烟（无设备：config/info 走 python，stdout 必须是合法 JSON）

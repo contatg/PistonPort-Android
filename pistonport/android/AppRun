@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+
+appdir=${APPDIR:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}
+rootfs=${FXD_ROOT:-}
+profile=${SPARTAN_HOME:-$(dirname "$appdir")/home/pistonport}
+export SPARTAN_HOME="$profile"
+export LD_LIBRARY_PATH="$appdir/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+if [ -n "$rootfs" ]; then
+    system_lib="$rootfs/usr/lib/aarch64-linux-gnu"
+    export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$system_lib"
+    if [ -f "$rootfs/usr/lib/fexdroid/libfexpad.so" ]; then
+        export SPARTAN_PAD_LIB="${SPARTAN_PAD_LIB:-$rootfs/usr/lib/fexdroid/libfexpad.so}"
+    fi
+    if [ -x "$system_lib/ld-linux-aarch64.so.1" ] && [ -x "$rootfs/usr/bin/python3.13" ]; then
+        exec "$system_lib/ld-linux-aarch64.so.1" "$rootfs/usr/bin/python3.13" "$appdir/nixport_session.py" "$@"
+    fi
+fi
+exec python3 "$appdir/nixport_session.py" "$@"
