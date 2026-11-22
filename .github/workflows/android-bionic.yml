@@ -131,8 +131,48 @@ jobs:
             fi
           done
 
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Package and verify the native APK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36"
+          cd pistonport/native-android
+          sdl="$RUNNER_TEMP/bionic-deps/.local-deps/android/bionic-src/SDL3-3.2.10"
+          generated=app/build/sdl-java
+          jni=app/build/native-libs/arm64-v8a
+          mkdir -p "$generated" "$jni"
+          cp -R "$sdl/android-project/app/src/main/java/." "$generated/"
+          install -D -m 0644 PistonSource.kt "$generated/ro/cobrabm/fexdroid/PistonSource.kt"
+          cp "$RUNNER_TEMP/native-runtime/"*.so "$jni/"
+          gradle --no-daemon :app:assembleDebug
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          sdk_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$sdk_tools/apksigner" verify --verbose "$apk"
+          "$sdk_tools/zipalign" -c -P 16 4 "$apk"
+          python3 - "$apk" <<'PYTHON'
+          import sys
+          from zipfile import ZipFile
+
+          with ZipFile(sys.argv[1]) as apk:
+              files = set(apk.namelist())
+              expected = {"libpistonport.so", "libgportcpu.so", "libSDL3.so", "libc++_shared.so"}
+              assert {f"lib/arm64-v8a/{name}" for name in expected} <= files
+              assert {"AndroidManifest.xml", "classes.dex"} <= files
+              assert all(not name.startswith("assets/rootfs") for name in files)
+          PYTHON
+          install -Dm644 "$apk" "$RUNNER_TEMP/piston-apk/PistonPort-Android-Native-arm64.apk"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: PistonPort-Android-native-runtime
-          path: ${{ runner.temp }}/native-runtime
+          name: PistonPort-Android-Native-APK
+          path: ${{ runner.temp }}/piston-apk/PistonPort-Android-Native-arm64.apk
           if-no-files-found: error
+          compression-level: 0

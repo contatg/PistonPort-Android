@@ -11,6 +11,7 @@ on:
     paths:
       - .github/workflows/android-apk.yml
       - pistonport/apk/**
+      - pistonport/native-android/PistonSource.kt
 
 permissions:
   actions: read
@@ -36,6 +37,7 @@ jobs:
           path="$GITHUB_WORKSPACE/pistonport/apk"
           git -C "$RUNNER_TEMP/host" apply "$path/fexdroid.patch"
           install -m 0644 "$path/PistonHome.kt" "$RUNNER_TEMP/host/app/src/main/java/ro/cobrabm/fexdroid/PistonHome.kt"
+          install -m 0644 "$GITHUB_WORKSPACE/pistonport/native-android/PistonSource.kt" "$RUNNER_TEMP/host/app/src/main/java/ro/cobrabm/fexdroid/PistonSource.kt"
           install -D -m 0644 "$GITHUB_WORKSPACE/pistonport/launcher/pistonport.png" "$RUNNER_TEMP/host/app/src/main/res/drawable-nodpi/pistonport.png"
 
       - name: Fetch the legacy executable and game preparer

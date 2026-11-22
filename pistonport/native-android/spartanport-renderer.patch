@@ -105,7 +105,7 @@ index a40c4f2..ea5e1b6 100644
 +    } else
  #endif
 diff --git a/src/probe.c b/src/probe.c
-index 5daee3d..cf86a0e 100644
+index 5daee3d..6cefa98 100644
 --- a/src/probe.c
 +++ b/src/probe.c
 @@ -25,2 +25,5 @@
@@ -125,7 +125,21 @@ index 5daee3d..cf86a0e 100644
  #endif
 +#endif
  }
-@@ -1293,4 +1301,8 @@ int main(int argc, char **argv) {
+@@ -1283,2 +1291,13 @@ void runtime_restart(void) {
+ int main(int argc, char **argv) {
++#ifdef __ANDROID__
++    const char *log_path = getenv("PISTON_LOG_FILE");
++    if (log_path && *log_path) {
++        int log_fd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
++        if (log_fd >= 0) {
++            dup2(log_fd, STDOUT_FILENO);
++            dup2(log_fd, STDERR_FILENO);
++            if (log_fd > STDERR_FILENO) close(log_fd);
++        }
++    }
++#endif
+     setvbuf(stdout, NULL, _IONBF, 0);
+@@ -1293,4 +1312,8 @@ int main(int argc, char **argv) {
         non-PIE brk heap, i.e. below 1 TiB: the guest packs pointers into 40 bits. */
 +#ifdef __ANDROID__
 +    mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, M_HEAP_TAGGING_LEVEL_NONE);
