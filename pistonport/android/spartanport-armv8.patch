@@ -1,5 +1,5 @@
 diff --git a/packaging/arm-linux/build.sh b/packaging/arm-linux/build.sh
-index 3c9c52f..4bb8400 100755
+index 3c9c52f..3c92bd1 100755
 --- a/packaging/arm-linux/build.sh
 +++ b/packaging/arm-linux/build.sh
 @@ -107,3 +107,4 @@ spartan_nixport=ON
@@ -13,6 +13,11 @@ index 3c9c52f..4bb8400 100755
 -        -DBUILD_FEX_LINUX_TESTS=OFF -DENABLE_ZYDIS=OFF -DTUNE_ARCH=armv8.2-a -DTUNE_CPU=generic >/dev/null
 +        -DBUILD_FEX_LINUX_TESTS=OFF -DENABLE_ZYDIS=OFF -DTUNE_ARCH="$fex_tune_arch" -DTUNE_CPU=generic >/dev/null
  fi
+@@ -165,3 +166,3 @@ install -m755 "$out/fex/libgportcpu.so" "$out/bin/gpu/"
+ begin "rust launcher (optional)"
+-if command -v cargo >/dev/null 2>&1; then
++if [[ ${SPARTAN_APPDIR_ONLY:-0} != 1 ]] && command -v cargo >/dev/null 2>&1; then
+     bash launcher-rust/build-aarch64.sh
 @@ -275,2 +276,8 @@ done
 
 +# Leave an unpacked runtime for external ports to stage their own entry point.

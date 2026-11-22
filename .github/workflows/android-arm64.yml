@@ -1,0 +1,73 @@
+name: PistonPort Android ARM64
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/android-arm64.yml
+      - pistonport/android/**
+      - pistonport/prepare.py
+      - pistonport/run_arm64.py
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      GPORT_DEBIAN_MIRROR: https://deb.debian.org/debian
+      SPARTAN_APPDIR_ONLY: '1'
+      SPARTAN_FEX_TUNE_ARCH: armv8-a
+      SPARTAN_REF: 56e804d1ef3e108257b94c51b6f7fb204930a244
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Test PistonPort preparation
+        run: python3 -m unittest discover -s pistonport/tests
+
+      - name: Get ARM64 runtime source and dependencies
+        run: |
+          git init "$RUNNER_TEMP/spartanport"
+          git -C "$RUNNER_TEMP/spartanport" remote add origin https://github.com/zFitness/gow3_android.git
+          git -C "$RUNNER_TEMP/spartanport" fetch --depth 1 origin "$SPARTAN_REF"
+          git -C "$RUNNER_TEMP/spartanport" checkout --detach FETCH_HEAD
+          git -C "$RUNNER_TEMP/spartanport" submodule update --init --recursive --jobs 4
+          git -C "$RUNNER_TEMP/spartanport" apply "$GITHUB_WORKSPACE/pistonport/android/spartanport-armv8.patch"
+          bash "$RUNNER_TEMP/spartanport/packaging/arm-linux/ci-deps.sh"
+
+      - name: Cross-compile ARM64 runtime
+        run: bash "$RUNNER_TEMP/spartanport/packaging/arm-linux/build.sh"
+
+      - name: Build Nixport package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir "$RUNNER_TEMP/appimage-tools"
+          gh release download --repo AppImage/appimagetool --pattern '*x86_64.AppImage' --dir "$RUNNER_TEMP/appimage-tools"
+          tool=$(find "$RUNNER_TEMP/appimage-tools" -maxdepth 1 -name '*x86_64.AppImage' -print -quit)
+          chmod +x "$tool"
+          cat > "$RUNNER_TEMP/build-pistonport-appimage" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          tool=$(find "$RUNNER_TEMP/appimage-tools" -maxdepth 1 -name '*x86_64.AppImage' -print -quit)
+          exec env ARCH=aarch64 APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --no-appstream "$@"
+          SH
+          chmod +x "$RUNNER_TEMP/build-pistonport-appimage"
+          python3 pistonport/android/package_nixport.py \
+            --runtime "$RUNNER_TEMP/spartanport/out/arm64-linux/pkg/gport" \
+            --out "$RUNNER_TEMP/pistonport-android" \
+            --appimage-builder "$RUNNER_TEMP/build-pistonport-appimage"
+          cd "$RUNNER_TEMP/pistonport-android"
+          sha256sum PistonPort-Android-nixport.zip > PistonPort-Android-nixport.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PistonPort-Android-ARM64
+          path: |
+            ${{ runner.temp }}/pistonport-android/PistonPort-Android-nixport.zip
+            ${{ runner.temp }}/pistonport-android/PistonPort-Android-nixport.zip.sha256
+          if-no-files-found: error
