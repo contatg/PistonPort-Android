@@ -463,11 +463,14 @@ def prepare(game, reference, llvm, out, shad, prebuilt=None):
     else:
         from fibers import compile_fibers
 
+        tool_suffix = ".exe" if os.name == "nt" else ""
+        clang = llvm / f"clang{tool_suffix}"
+        linker = llvm / f"ld.lld{tool_suffix}"
         obj = out / "cars3-runtime.o"
         elf = out / "cars3-runtime.elf"
         subprocess.run(
             [
-                llvm / "clang.exe",
+                clang,
                 "-target",
                 "x86_64-none-elf",
                 "-O2",
@@ -486,7 +489,7 @@ def prepare(game, reference, llvm, out, shad, prebuilt=None):
         saves = out / "cars3-save.o"
         subprocess.run(
             [
-                llvm / "clang.exe",
+                clang,
                 "-target",
                 "x86_64-none-elf",
                 "-O2",
@@ -502,7 +505,7 @@ def prepare(game, reference, llvm, out, shad, prebuilt=None):
         )
         subprocess.run(
             [
-                llvm / "clang.exe",
+                clang,
                 "-target",
                 "x86_64-none-elf",
                 "-O2",
@@ -518,7 +521,7 @@ def prepare(game, reference, llvm, out, shad, prebuilt=None):
         )
         subprocess.run(
             [
-                llvm / "ld.lld.exe",
+                linker,
                 "-T",
                 source / "runtime.ld",
                 f"--defsym=CARS3_BASE={base}",
@@ -607,16 +610,32 @@ def prepare(game, reference, llvm, out, shad, prebuilt=None):
         f.write(image)
     tmp.replace(path)
     print(path)
+    return path
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for arg in ("game", "reference", "llvm", "out", "shad"):
         parser.add_argument(arg, type=Path)
+    parser.add_argument(
+        "--arm64-low",
+        action="store_true",
+        help="also prepare a 540p image for the experimental ARM64 runtime",
+    )
     args = parser.parse_args()
-    prepare(
+    image = prepare(
         *(
             path.resolve()
             for path in (args.game, args.reference, args.llvm, args.out, args.shad)
         )
     )
+    if args.arm64_low:
+        mobile_image = apply_graphics_patches(
+            image,
+            image.with_name("cars3-arm64-low.bin"),
+            resolution="540p",
+            shadow_resolution=512,
+            skip_intro=True,
+            bloom=False,
+        )
+        print(mobile_image)

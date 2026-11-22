@@ -1,5 +1,6 @@
 """Compile upstream's fiber logic against SpartanPort's per-thread keys."""
 
+import os
 import re
 import subprocess
 
@@ -41,9 +42,11 @@ def compile_fibers(shad, source, llvm, out):
         encoding="utf-8",
     )
     obj = out / "cars3-fibers.o"
+    tool_suffix = ".exe" if os.name == "nt" else ""
+    clang = llvm / f"clang++{tool_suffix}"
     subprocess.run(
         [
-            llvm / "clang++.exe",
+            clang,
             "-target",
             "x86_64-none-elf",
             "-std=c++20",

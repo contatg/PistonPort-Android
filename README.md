@@ -18,6 +18,22 @@ You need a Vulkan-capable graphics driver and a playable PKG or extracted game f
 
 [Player Guide](pistonport/launcher/QUICKSTART.md) · [Technical Notes & Build](pistonport/README.md) · [Settings Screenshot](docs/images/pistonport/PistonPort-Settings.png) · [Gameplay Screenshot](docs/images/pistonport/PistonPort-Gameplay.jpg) · [Ultrawide Screenshot](docs/images/pistonport/PistonPort-Ultrawide.jpg)
 
+## Adaptação experimental para Android
+
+O primeiro alvo é iniciar o jogo no runtime ARM64 do SpartanPort dentro de uma sessão compatível com o Nixport. O processo usa uma cópia própria de CUSA07027 v01.00, extraída localmente. O suporte ao menu e às corridas ainda precisa ser validado em um aparelho.
+
+No Linux, use o Python com pyelftools e os checkouts de referência descritos nas [instruções de build](pistonport/README.md#building). Indique o diretório que contém `clang`, `clang++` e `ld.lld` ao preparar a imagem.
+
+```sh
+python3 pistonport/prepare.py /caminho/jogo /caminho/spartanport /caminho/llvm/bin /caminho/out /caminho/shadps4 --arm64-low
+```
+
+A opção gera `cars3-arm64-low.bin` em 960×540, com sombras de 512 px, sem bloom nem motion blur. Com o `spartanport-probe` ARM64 e suas bibliotecas já disponíveis na sessão de teste, o iniciador aplica limite inicial de 30 FPS e grava o log em `native-last.log` dentro do perfil.
+
+```sh
+python3 pistonport/run_arm64.py --probe /caminho/spartanport-probe --image /caminho/out/cars3-arm64-low.bin --game /caminho/jogo --profile /caminho/perfil
+```
+
 ## Credits
 
 PistonPort uses SpartanPort’s loader, shadPS4’s Vulkan renderer, and Rune for the launcher. [SpartanPort](https://github.com/FelipePrado0/SpartanPort) · [shadPS4](https://github.com/shadps4-emu/shadPS4) · [Rune](https://github.com/anomalyco/rune) · [License](LICENSE)

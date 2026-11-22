@@ -6,7 +6,6 @@ import ctypes
 import hashlib
 import io
 import json
-import msvcrt
 import os
 import platform
 import re
@@ -1019,6 +1018,10 @@ def main():
         return inspect_trophies(opt.game.resolve())
     if opt.profile is None:
         args.error("--profile is required to play or prepare the game")
+    if os.name != "nt":
+        args.error("Use pistonport/prepare.py to prepare an image outside Windows")
+    import msvcrt
+
     game, profile = opt.game.resolve(), opt.profile.resolve()
     profile.mkdir(parents=True, exist_ok=True)
     with ExitStack() as resources:
