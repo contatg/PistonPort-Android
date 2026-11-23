@@ -42,7 +42,10 @@ internal class PerformanceHud(context: Context, private val upscaler: String) : 
             lastTime = now
             val gpu = sensors.sample()
             val label = buildString {
-                append(fps?.let { String.format(Locale.getDefault(), "%.0f FPS", it) } ?: "— FPS")
+                append(fps?.let {
+                    val format = if (it in 0.0..<10.0) "%.1f FPS" else "%.0f FPS"
+                    String.format(Locale.getDefault(), format, it)
+                } ?: "Aguardando frames")
                 if (fps != null && fps > 0) append(String.format(Locale.getDefault(), "  %.1f ms", 1000 / fps))
                 if (real < total && elapsed > 0) {
                     append(String.format(Locale.getDefault(), "  (%.0f base + FG)", real * 1000.0 / elapsed))

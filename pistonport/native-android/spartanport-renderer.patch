@@ -2077,7 +2077,7 @@ index 472be23..48d7718 100644
 +#endif
 
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
-index 4f29b10..eec5a52 100644
+index 4f29b10..d46868c 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
 @@ -50,2 +50,6 @@
@@ -2101,7 +2101,13 @@ index 4f29b10..eec5a52 100644
 +    }
 +#endif
      float swapchain_aspect = static_cast<float>(swapchain_width) / swapchain_height;
-@@ -880,2 +895,109 @@ void Presenter::PresentLoadingFrame() {
+@@ -308,2 +323,5 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
+     const u32 num_images = swapchain.GetImageCount();
++#ifdef __ANDROID__
++    SetExpectedGameSize(swapchain.GetWidth(), swapchain.GetHeight());
++#endif
+     const vk::Device device = instance.GetDevice();
+@@ -880,2 +898,109 @@ void Presenter::PresentLoadingFrame() {
 
 +#ifdef __ANDROID__
 +void Presenter::PresentBloodframe(Frame* frame) {
@@ -2211,7 +2217,7 @@ index 4f29b10..eec5a52 100644
 +#endif
 +
  void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame) {
-@@ -928,2 +1050,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+@@ -928,2 +1053,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
 +#ifdef __ANDROID__
 +    if (is_game_frame && !is_reusing_frame && !frame->is_hdr) {
@@ -2219,7 +2225,37 @@ index 4f29b10..eec5a52 100644
 +    }
 +#endif
      const auto acquire_start = profile ? Clock::now() : Clock::time_point{};
-@@ -1100,3 +1227,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+@@ -998,14 +1128,18 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+                                {}, {}, pre_barriers);
+-        const vk::ClearColorValue black{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
+-        cmdbuf.clearColorImage(swapchain_image, vk::ImageLayout::eTransferDstOptimal, black, color_range);
+-        const vk::MemoryBarrier clear_done{
+-            .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+-            .dstAccessMask = vk::AccessFlagBits::eTransferWrite,
+-        };
+-        cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer,
+-                               vk::DependencyFlagBits::eByRegion, clear_done, {}, {});
++        const auto region = MakeImageBlitFit(frame->width, frame->height, extent.width, extent.height);
++        if (region.dstOffsets[0].x != 0 || region.dstOffsets[0].y != 0 ||
++            region.dstOffsets[1].x != static_cast<s32>(extent.width) ||
++            region.dstOffsets[1].y != static_cast<s32>(extent.height)) {
++            const vk::ClearColorValue black{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
++            cmdbuf.clearColorImage(swapchain_image, vk::ImageLayout::eTransferDstOptimal,
++                                   black, color_range);
++            const vk::MemoryBarrier clear_done{
++                .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
++                .dstAccessMask = vk::AccessFlagBits::eTransferWrite,
++            };
++            cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer,
++                                   vk::DependencyFlagBits::eByRegion, clear_done, {}, {});
++        }
+         cmdbuf.blitImage(frame->image, vk::ImageLayout::eTransferSrcOptimal, swapchain_image,
+-                         vk::ImageLayout::eTransferDstOptimal,
+-                         MakeImageBlitFit(frame->width, frame->height, extent.width, extent.height),
+-                         vk::Filter::eLinear);
++                         vk::ImageLayout::eTransferDstOptimal, region, vk::Filter::eLinear);
+         if (VideoCore::ConsumeGameOnlyScreenshotRequests() != 0) {
+@@ -1100,3 +1234,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
          std::scoped_lock submit_lock{Scheduler::submit_mutex};
 -        if (!swapchain.Present() && !window.IsMinimized() && window.GetWidth() > 0 &&
 +        const bool presented = swapchain.Present();
@@ -2230,6 +2266,21 @@ index 4f29b10..eec5a52 100644
 +#endif
 +        if (!presented && !window.IsMinimized() && window.GetWidth() > 0 &&
              window.GetHeight() > 0) {
+@@ -1211,2 +1351,14 @@ void Presenter::SetExpectedGameSize(s32 width, s32 height) {
+     }
++#ifdef __ANDROID__
++    // Keep the intermediate post-process buffer at the game's size in light mode.
++    // The last blit still fills the display with the requested aspect ratio.
++    static const int max_height = [] {
++        const char* value = std::getenv("PISTON_PRESENT_HEIGHT");
++        return value ? std::clamp(std::atoi(value), 240, 1080) : 0;
++    }();
++    if (max_height > 0 && height > max_height) {
++        width = std::max(2, static_cast<s32>(static_cast<s64>(width) * max_height / height));
++        height = max_height;
++    }
++#endif
+     const float ratio = (float)width / (float)height;
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h
 index 212581e..67cca63 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h
@@ -2249,6 +2300,32 @@ index 212581e..67cca63 100644
 +    bool bloodframe_initialized = false;
 +#endif
      Scheduler flip_scheduler;
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp
+index 6e2a115..8b3b422 100644
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp
+@@ -157,4 +157,11 @@ bool Swapchain::AcquireNextImage() {
+     case vk::Result::eSuccess:
++#ifdef __ANDROID__
++    // Android can report SUBOPTIMAL repeatedly on an otherwise usable surface.
++    // This still acquires an image and signals its semaphore.
++    case vk::Result::eSuboptimalKHR:
++#endif
+         break;
++#ifndef __ANDROID__
+     case vk::Result::eSuboptimalKHR:
++#endif
+     case vk::Result::eErrorSurfaceLostKHR:
+@@ -189,2 +196,9 @@ bool Swapchain::Present() {
+     auto result = instance.GetPresentQueue().presentKHR(present_info);
++#ifdef __ANDROID__
++    // SUBOPTIMAL still queued the frame. Resize and out-of-date handling rebuild
++    // the swapchain when necessary, without waiting for device idle every frame.
++    if (result == vk::Result::eSuboptimalKHR) {
++        result = vk::Result::eSuccess;
++    }
++#endif
+     if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR ||
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
 index a11e28c..100c7a4 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
@@ -2376,6 +2453,26 @@ index 495d892..6595165 100644
 +    std::unique_ptr<GsrUpscaler> gsr2;
 +    bool resources_gsr2 = false;
      std::unique_ptr<FrameGeneration> frame_generation;
+diff --git a/gpu/shadps4/video_core/texture_cache/sampler.cpp b/gpu/shadps4/video_core/texture_cache/sampler.cpp
+index 968de34..ac79aa3 100644
+--- a/gpu/shadps4/video_core/texture_cache/sampler.cpp
++++ b/gpu/shadps4/video_core/texture_cache/sampler.cpp
+@@ -4,2 +4,5 @@
+ #include <algorithm>
++#ifdef __ANDROID__
++#include <cstdlib>
++#endif
+ #include "spartanport_settings.h"
+@@ -22,4 +25,8 @@ Sampler::Sampler(const Vulkan::Instance& instance, const AmdGpu::Sampler& sample
+                                   sampler.mip_filter != AmdGpu::MipFilter::None;
+-    const bool anisotropy_enable =
++    bool anisotropy_enable =
+         instance.IsAnisotropicFilteringSupported() && (game_anisotropy || force_anisotropy);
++#ifdef __ANDROID__
++    static const bool cheap_filter = std::getenv("PISTON_PRESENT_HEIGHT") != nullptr;
++    anisotropy_enable = anisotropy_enable && !cheap_filter;
++#endif
+     const float requested = std::max(game_anisotropy ? sampler.MaxAniso() : 1.0f,
 diff --git a/gpu/shim/android_vulkan.h b/gpu/shim/android_vulkan.h
 new file mode 100644
 index 0000000..1b69ef2

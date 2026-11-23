@@ -98,6 +98,11 @@ class GameActivity : SDLActivity() {
             "PISTON_FRAMEGEN_PERFORMANCE" to flag("fg_fast", true),
             "PISTON_FRAMEGEN_FP16" to flag("fg_fp16", true))
         for ((key, value) in video) Os.setenv(key, value, true)
+        if (intent.getBooleanExtra("lite_mode", false)) {
+            Os.setenv("PISTON_PRESENT_HEIGHT", "360", true)
+            Os.setenv("SPARTAN_FRAMES_AHEAD", "2", true)
+            Os.setenv("SPARTAN_RCAS", "0", true)
+        }
         val dll = FrameGenAssets.lossless(profile)
         val mako = FrameGenAssets.mako(profile)
         if (dll.isFile) Os.setenv("PISTON_LOSSLESS_DLL", dll.path, true)

@@ -164,6 +164,16 @@ class HomeActivity : Activity() {
 
     private fun buildGraphics(): LinearLayout = column().apply {
         val rendering = card("Imagem e desempenho")
+        append(rendering, Switch(this@HomeActivity).apply {
+            text = "Modo leve"
+            setTextColor(PortStyle.text)
+            minHeight = dp(48)
+            isChecked = settings.liteMode
+            setOnCheckedChangeListener { _, checked -> settings.liteMode = checked }
+        })
+        append(rendering, PortStyle.text(this@HomeActivity,
+            "Ativo no Snapdragon 685 por padrão. Usa 360p e limita a 30 FPS, com efeitos e framegen desligados. Desative para usar seus ajustes manuais.",
+            13f, PortStyle.muted))
         menuChoice(rendering, "Resolução interna", listOf(
             360 to "360p", 480 to "480p", 540 to "540p", 720 to "720p",
             900 to "900p", 1080 to "1080p", 1440 to "1440p"),
@@ -412,8 +422,9 @@ class HomeActivity : Activity() {
 
     private fun playGame() {
         val folder = PistonSource.current(filesDir) ?: return
-        val selectedResolution = settings.resolution
-        val generation = settings.choice("framegen", 0)
+        val launch = gameIntent().putExtra("folder", folder.path)
+        val selectedResolution = settings.launchResolution
+        val generation = settings.launchFrameGeneration
         val profile = graphicsProfile()
         if (generation >= 2) {
             val mako = settings.choice("fg_model", 0) == 1
@@ -436,7 +447,7 @@ class HomeActivity : Activity() {
                 preparing = false
                 refresh()
                 image.onSuccess { path ->
-                    startActivity(gameIntent().putExtra("folder", folder.path).putExtra("image", path))
+                    startActivity(launch.putExtra("image", path))
                 }.onFailure { error ->
                     status.text = error.message ?: "Falha ao preparar a imagem do jogo."
                 }
