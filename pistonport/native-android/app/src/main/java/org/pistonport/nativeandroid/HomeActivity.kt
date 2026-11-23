@@ -61,7 +61,7 @@ class HomeActivity : Activity() {
                         preparing = false
                         refresh()
                         image.onSuccess { path ->
-                            startActivity(Intent(this, GameActivity::class.java)
+                            startActivity(Intent(this@HomeActivity, GameActivity::class.java)
                                 .putExtra("folder", folder.path).putExtra("image", path))
                         }.onFailure { error ->
                             status.text = error.message ?: "Falha ao preparar a imagem do jogo."
@@ -77,7 +77,7 @@ class HomeActivity : Activity() {
                 if (!preparing) startActivity(Intent(this@HomeActivity, GameActivity::class.java))
             }
         })
-        diagnostics = TextView(this).apply { textIsSelectable = true }
+        diagnostics = TextView(this).apply { setTextIsSelectable(true) }
         column.addView(diagnostics)
         setContentView(ScrollView(this).apply { addView(column) })
     }
