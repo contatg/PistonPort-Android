@@ -38,6 +38,14 @@ index e933214..f95d0a0 100644
 +endif()
 +
  # spartanport (Windows): spartanportgpu is a static library there, so the loader and the HLE runtime are
+diff --git a/gpu/shadps4/core/libraries/kernel/equeue.h b/gpu/shadps4/core/libraries/kernel/equeue.h
+index 9b3c73c..e155b08 100644
+--- a/gpu/shadps4/core/libraries/kernel/equeue.h
++++ b/gpu/shadps4/core/libraries/kernel/equeue.h
+@@ -9,2 +9,3 @@
+ #include <vector>
++#include <exception>
+ #include <boost/asio/steady_timer.hpp>
 diff --git a/gpu/shadps4/video_core/buffer_cache/region_manager.h b/gpu/shadps4/video_core/buffer_cache/region_manager.h
 index 5d723a2..26c0aa2 100644
 --- a/gpu/shadps4/video_core/buffer_cache/region_manager.h
