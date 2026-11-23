@@ -1,5 +1,5 @@
 diff --git a/gpu/CMakeLists.txt b/gpu/CMakeLists.txt
-index e933214..f95d0a0 100644
+index e933214..7076df6 100644
 --- a/gpu/CMakeLists.txt
 +++ b/gpu/CMakeLists.txt
 @@ -59,2 +59,5 @@ endif()
@@ -23,7 +23,7 @@ index e933214..f95d0a0 100644
 -else()
 +elseif (NOT ANDROID)
      target_link_libraries(spartanportgpu PUBLIC PkgConfig::X11)
-@@ -213,2 +216,14 @@ endif()
+@@ -213,2 +216,17 @@ endif()
 
 +if (ANDROID)
 +    file(GLOB SPARTAN_RUNTIME CONFIGURE_DEPENDS ../src/runtime*.c)
@@ -33,6 +33,9 @@ index e933214..f95d0a0 100644
 +    add_library(pistonport SHARED ../src/probe.c ${SPARTAN_RUNTIME} ../src/vulkan_smoke.c)
 +    set_target_properties(pistonport PROPERTIES C_STANDARD 11)
 +    target_include_directories(pistonport PRIVATE .. ../src)
++    # FFmpeg's ARM64 assembly uses direct references to its own transform tables.
++    # Symbols from static archives stay private to libpistonport.so.
++    target_link_options(pistonport PRIVATE "LINKER:--exclude-libs,ALL")
 +    target_link_libraries(pistonport PRIVATE spartanportgpu atrac9 "${SPARTAN_ANDROID_CPU}"
 +        android dl log m Vulkan::Vulkan z)
 +endif()
