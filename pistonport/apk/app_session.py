@@ -14,7 +14,9 @@ import run_arm64
 RUNTIME = Path(__file__).resolve().parent
 
 
-def image_for(game, profile, resources=RUNTIME, link_boot=None):
+def image_for(game, profile, resources=RUNTIME, link_boot=None, resolution="540p"):
+    if resolution not in ("540p", "720p", "native"):
+        raise ValueError("Resolução interna não suportada.")
     prepare.check_game_folder(game)
     manifest = json.loads((resources / "image.json").read_text(encoding="utf-8"))
     signature = hashlib.sha256()
@@ -25,11 +27,11 @@ def image_for(game, profile, resources=RUNTIME, link_boot=None):
             raise ValueError(f"Arquivo incompatível com CUSA07027 v01.00: {name}")
         signature.update(bytes.fromhex(actual))
     signature.update(bytes.fromhex(manifest["image_sha256"]))
-    image = profile / f"cars3-540p-{signature.hexdigest()[:16]}.bin"
+    image = profile / f"cars3-{resolution}-{signature.hexdigest()[:16]}.bin"
     if image.is_file():
         return image
 
-    print("Preparando o jogo em 540p…", flush=True)
+    print(f"Preparando o jogo em {resolution}…", flush=True)
     with tempfile.TemporaryDirectory(dir=profile) as directory:
         working = Path(directory)
         linked = prepare.prepare(game, resources / "upstream", None, working, None,
@@ -39,7 +41,7 @@ def image_for(game, profile, resources=RUNTIME, link_boot=None):
         if actual != manifest["image_sha256"]:
             raise ValueError("A imagem gerada não corresponde à revisão esperada.")
         prepare.apply_graphics_patches(
-            linked, image, resolution="540p", shadow_resolution=512,
+            linked, image, resolution=resolution, shadow_resolution=512,
             skip_intro=True, bloom=False,
         )
     return image

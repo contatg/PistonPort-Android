@@ -180,6 +180,8 @@ jobs:
           cp "$prefix/lib/libSDL3.so" "$staging/"
           cp "$RUNNER_TEMP/bionic-game/adrenotools/src/hook/"{libmain_hook,libhook_impl}.so "$staging/"
           cp "$llvm/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" "$staging/"
+          "$llvm/bin/aarch64-linux-android$ANDROID_API-clang" -std=c11 -O2 -shared -fPIC \
+            -I "$prefix/include" pistonport/native-android/gpu_info.c -lvulkan -o "$staging/libpiston_gpu_info.so"
           "$llvm/bin/llvm-readelf" --dyn-syms --wide "$staging/libpistonport.so" > "$RUNNER_TEMP/piston-symbols"
           grep -E 'GLOBAL.*DEFAULT +[0-9]+ SDL_main$' "$RUNNER_TEMP/piston-symbols"
           grep -E 'GLOBAL.*DEFAULT +[0-9]+ piston_android_vulkan_loader$' "$RUNNER_TEMP/piston-symbols"
@@ -249,16 +251,16 @@ jobs:
 
           with ZipFile(sys.argv[1]) as apk:
               files = set(apk.namelist())
-              expected = {"libpistonport.so", "libgportcpu.so", "libSDL3.so", "libc++_shared.so", "libmain_hook.so", "libhook_impl.so"}
+              expected = {"libpistonport.so", "libgportcpu.so", "libSDL3.so", "libc++_shared.so", "libmain_hook.so", "libhook_impl.so", "libpiston_gpu_info.so"}
               assert {f"lib/arm64-v8a/{name}" for name in expected} <= files
               assert {"AndroidManifest.xml", "classes.dex", "assets/image.json", "assets/cars3-runtime.elf"} <= files
               assert all(not name.startswith("assets/rootfs") for name in files)
           PYTHON
-          install -Dm644 "$apk" "$RUNNER_TEMP/piston-apk/PistonPort-Android-Launcher-arm64.apk"
+          install -Dm644 "$apk" "$RUNNER_TEMP/piston-apk/PistonPort-Android-DriverHub-arm64.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: PistonPort-Android-Launcher-APK
-          path: ${{ runner.temp }}/piston-apk/PistonPort-Android-Launcher-arm64.apk
+          name: PistonPort-Android-DriverHub-APK
+          path: ${{ runner.temp }}/piston-apk/PistonPort-Android-DriverHub-arm64.apk
           if-no-files-found: error
           compression-level: 0

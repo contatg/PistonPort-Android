@@ -2,6 +2,7 @@ package org.pistonport.nativeandroid
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -33,13 +34,21 @@ class HomeActivity : Activity() {
     private lateinit var graphicsPanel: LinearLayout
     private lateinit var controlsPanel: LinearLayout
     private lateinit var preview: FrameLayout
+    private lateinit var editPositions: Button
     private lateinit var status: TextView
     private lateinit var diagnostics: TextView
     private lateinit var play: Button
     private lateinit var select: Button
     private lateinit var driverStatus: TextView
     private lateinit var importDriver: Button
-    private lateinit var toggleDriver: Button
+    private lateinit var installedDrivers: Button
+    private lateinit var downloadDrivers: Button
+    private lateinit var homeGpu: TextView
+    private lateinit var settingsGpu: TextView
+    private var gpuInfo: GpuInfo? = null
+    private var catalog: List<DriverCatalog.Entry>? = null
+    private var editingControls = false
+    private var showingVulkanLog = false
     private lateinit var testVulkan: Button
     private var importingDriver = false
     private var selecting = false
@@ -68,6 +77,17 @@ class HomeActivity : Activity() {
         setContentView(root)
         showSettings(state?.getBoolean("settings_page") == true)
         showControls(state?.getBoolean("controls_page") == true)
+        Thread {
+            val result = runCatching { GpuInfo.detect() }.getOrElse {
+                GpuInfo("GPU não detectada", "indisponível", false)
+            }
+            runOnUiThread {
+                if (!isDestroyed && !isFinishing) {
+                    gpuInfo = result
+                    refresh()
+                }
+            }
+        }.start()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -114,6 +134,11 @@ class HomeActivity : Activity() {
         }
         append(game, select)
         addView(game)
+        val hardware = card("GPU e Vulkan")
+        homeGpu = PortStyle.text(this@HomeActivity, "", 14f, PortStyle.muted)
+        hardware.addView(homeGpu)
+        append(hardware, button("Abrir Hub de drivers") { showSettings(true); showControls(false) })
+        append(this, hardware)
     }
 
     private fun buildSettings(): LinearLayout = page().apply {
@@ -136,13 +161,16 @@ class HomeActivity : Activity() {
 
     private fun buildGraphics(): LinearLayout = column().apply {
         val rendering = card("Desempenho")
-        rendering.addView(PortStyle.text(this@HomeActivity, "Resolução interna · 960 × 540", 14f, PortStyle.muted))
+        choices(rendering, "Resolução interna", listOf(540 to "540p", 720 to "720p", 1080 to "1080p"),
+            { settings.resolution }, { settings.resolution = it })
         choices(rendering, "Limite de FPS", listOf(30 to "30 FPS", 60 to "60 FPS"),
             { settings.fps }, { settings.fps = it })
         choices(rendering, "Filtragem de textura", listOf(0 to "Do jogo", 2 to "2×", 4 to "4×"),
             { settings.filtering }, { settings.filtering = it })
         addView(rendering)
-        val driver = card("Driver Vulkan")
+        val driver = card("Hub de drivers")
+        settingsGpu = PortStyle.text(this@HomeActivity, "", 14f, PortStyle.muted)
+        driver.addView(settingsGpu)
         driverStatus = PortStyle.text(this@HomeActivity, "", 14f, PortStyle.muted)
         driver.addView(driverStatus)
         importDriver = button("Selecionar Turnip (ZIP ou .so)") {
@@ -152,12 +180,11 @@ class HomeActivity : Activity() {
             }, PICK_TURNIP)
         }
         append(driver, importDriver)
-        toggleDriver = button("Usar driver do sistema") {
-            TurnipDriver.select(this@HomeActivity, !TurnipDriver.enabled(this@HomeActivity))
-            refresh()
-        }
-        append(driver, toggleDriver)
-        testVulkan = button("Testar Vulkan 1.3") { startActivity(gameIntent()) }
+        installedDrivers = button("Drivers instalados") { chooseInstalledDriver() }
+        append(driver, installedDrivers)
+        downloadDrivers = button("Baixar drivers do GitHub") { browseDrivers() }
+        append(driver, downloadDrivers)
+        testVulkan = button("Testar driver selecionado") { launchVulkanTest() }
         append(driver, testVulkan)
         append(this, driver)
         diagnostics = PortStyle.text(this@HomeActivity, "", 12f, PortStyle.muted).apply {
@@ -192,14 +219,26 @@ class HomeActivity : Activity() {
             addView(RaceBanner(this@HomeActivity).apply { alpha = .25f }, FrameLayout.LayoutParams(-1, -1))
         }
         previewFrame.addView(preview, LinearLayout.LayoutParams(-1, dp(178)))
+        editPositions = button("Editar posições") {
+            editingControls = !editingControls
+            val editor = preview.getChildAt(1) as RaceControls
+            editor.editing = editingControls
+            editPositions.text =
+                if (editingControls) "Concluir edição" else "Editar posições"
+        }
+        append(previewFrame, editPositions)
+        append(previewFrame, button("Restaurar posições") {
+            (preview.getChildAt(1) as RaceControls).resetLayout()
+        })
         append(this, previewFrame)
         updatePreview()
     }
 
     private fun updatePreview() {
         if (preview.childCount > 1) preview.removeViewAt(1)
-        preview.addView(RaceControls(this, settings.size, settings.opacity, { _, _ -> }, preview = true),
-            FrameLayout.LayoutParams(-1, -1))
+        preview.addView(RaceControls(this, settings.size, settings.opacity) { _, _ -> }.apply {
+            editing = editingControls
+        }, FrameLayout.LayoutParams(-1, -1))
     }
 
     private fun showSettings(visible: Boolean) {
@@ -275,10 +314,12 @@ class HomeActivity : Activity() {
 
     private fun playGame() {
         val folder = PistonSource.current(filesDir) ?: return
+        val selectedResolution = settings.resolution
+        showingVulkanLog = false
         preparing = true
         refresh()
         Thread {
-            val image = runCatching { NativeBoot.prepare(applicationContext, folder) }
+            val image = runCatching { NativeBoot.prepare(applicationContext, folder, selectedResolution) }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 preparing = false
@@ -300,19 +341,31 @@ class HomeActivity : Activity() {
     private fun refresh() {
         val folder = PistonSource.current(filesDir)
         val idle = !selecting && !preparing && !importingDriver
-        val turnip = TurnipDriver.enabled(this)
+        val selectedDriver = TurnipDriver.selected(this)
+        val installed = TurnipDriver.list(this)
+        val vulkanReport = readLog(GameActivity.vulkanLog(this, selectedDriver))
+        val gpuLabel = gpuInfo?.label ?: "Detectando GPU e Vulkan…"
+        homeGpu.text = gpuLabel
+        settingsGpu.text = gpuLabel
         select.isEnabled = idle
         play.isEnabled = idle && folder != null
         play.alpha = if (play.isEnabled) 1f else .6f
         importDriver.isEnabled = idle
         testVulkan.isEnabled = idle
-        toggleDriver.isEnabled = idle
-        toggleDriver.visibility = if (TurnipDriver.installed(this)) View.VISIBLE else View.GONE
-        toggleDriver.text = if (turnip) "Usar driver do sistema" else "Ativar Turnip instalado"
+        installedDrivers.isEnabled = idle
+        downloadDrivers.isEnabled = idle && gpuInfo?.family != null
         driverStatus.text = when {
-            importingDriver -> "Instalando o driver…"
-            turnip -> "Driver selecionado: Mesa Turnip"
-            else -> "Driver selecionado: Vulkan do sistema"
+            importingDriver -> "Consultando ou instalando driver…"
+            selectedDriver == null -> "Selecionado: Vulkan do sistema"
+            else -> {
+                val name = installed.firstOrNull { it.id == selectedDriver }?.name ?: "Turnip"
+                val result = when {
+                    "Vulkan 1.3 e extensões exigidas: OK." in vulkanReport -> "Vulkan 1.3 verificado"
+                    vulkanReport.isNotBlank() -> "Driver incompatível ou falha no teste"
+                    else -> "Vulkan 1.3 ainda não testado"
+                }
+                "Selecionado: $name\n$result"
+            }
         }
         status.text = when {
             preparing -> "Preparando a inicialização do jogo…"
@@ -320,18 +373,86 @@ class HomeActivity : Activity() {
             folder == null -> "Selecione a pasta extraída CUSA07027 v01.00 que contém eboot.bin."
             else -> "CUSA07027 v01.00 · ${folder.name}"
         }
-        diagnostics.text = runCatching {
-            RandomAccessFile(GameActivity.logFile(this), "r").use { stream ->
+        diagnostics.text = if (showingVulkanLog || !GameActivity.logFile(this).exists())
+            vulkanReport else readLog(GameActivity.logFile(this))
+        diagnostics.visibility = if (diagnostics.text.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    private fun readLog(file: File): String = runCatching {
+            RandomAccessFile(file, "r").use { stream ->
                 val count = minOf(stream.length(), 8192L).toInt()
                 stream.seek(stream.length() - count)
                 ByteArray(count).also { stream.readFully(it) }.decodeToString().trim()
             }
-        }.getOrDefault("")
-        diagnostics.visibility = if (diagnostics.text.isEmpty()) View.GONE else View.VISIBLE
+    }.getOrDefault("")
+
+    private fun launchVulkanTest() {
+        showingVulkanLog = true
+        startActivity(gameIntent())
+    }
+
+    private fun chooseInstalledDriver() {
+        val entries = listOf(TurnipDriver.Installed("", "Vulkan do sistema")) + TurnipDriver.list(this)
+        val selected = TurnipDriver.selected(this).orEmpty()
+        AlertDialog.Builder(this).setTitle("Drivers instalados")
+            .setSingleChoiceItems(entries.map { it.name }.toTypedArray(),
+                entries.indexOfFirst { it.id == selected }) { dialog, index ->
+                TurnipDriver.select(this, entries[index].id.ifBlank { null })
+                showingVulkanLog = true
+                dialog.dismiss()
+                refresh()
+            }.setNegativeButton("Fechar", null).show()
+    }
+
+    private fun browseDrivers() {
+        val family = gpuInfo?.family ?: return
+        catalog?.let { catalogDialog(it); return }
+        driverTask({ DriverCatalog.fetch(family) }) { entries ->
+            catalog = entries
+            catalogDialog(entries)
+        }
+    }
+
+    private fun catalogDialog(entries: List<DriverCatalog.Entry>) {
+        val installedIds = TurnipDriver.list(this).map { it.id }.toSet()
+        val dialog = AlertDialog.Builder(this).setTitle("Turnip · Adreno ${gpuInfo?.family}xx")
+            .setNegativeButton("Fechar", null)
+            .setNeutralButton("Atualizar") { _, _ -> catalog = null; browseDrivers() }
+        if (entries.isEmpty()) dialog.setMessage("Nenhum driver para esta família no catálogo.")
+        else dialog.setItems(entries.map {
+            val size = (it.size + 1048575) / 1048576
+            "${it.name} · ${it.source} · ${if (it.id in installedIds) "Instalado" else "$size MiB"}"
+        }.toTypedArray()) { _, index ->
+            val entry = entries[index]
+            if (entry.id in installedIds) {
+                TurnipDriver.select(this, entry.id)
+                showingVulkanLog = true
+                refresh()
+            } else {
+                driverTask({ DriverCatalog.install(applicationContext, entry) }) { launchVulkanTest() }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun <T> driverTask(work: () -> T, success: (T) -> Unit) {
+        importingDriver = true
+        refresh()
+        Thread {
+            val result = runCatching(work)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                importingDriver = false
+                refresh()
+                result.onSuccess(success).onFailure {
+                    driverStatus.text = it.message ?: "Falha no Hub de drivers."
+                }
+            }
+        }.start()
     }
 
     private fun gameIntent() = settings.applyTo(Intent(this, GameActivity::class.java))
-        .putExtra("turnip", TurnipDriver.enabled(this))
+        .putExtra("driver_id", TurnipDriver.selected(this))
 
     private fun openPicker() = startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_FOLDER)
 
@@ -348,17 +469,7 @@ class HomeActivity : Activity() {
         val uri = data?.data ?: return
         if (result != RESULT_OK || selecting || preparing || importingDriver) return
         if (code == PICK_TURNIP) {
-            importingDriver = true
-            refresh()
-            Thread {
-                val installed = runCatching { TurnipDriver.install(applicationContext, uri) }
-                runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    importingDriver = false
-                    refresh()
-                    installed.exceptionOrNull()?.let { driverStatus.text = it.message ?: "Falha ao instalar o Turnip." }
-                }
-            }.start()
+            driverTask({ TurnipDriver.install(applicationContext, uri) }) { launchVulkanTest() }
             return
         }
         if (code != PICK_FOLDER) return
@@ -384,7 +495,7 @@ class HomeActivity : Activity() {
 
 private object NativeBoot {
     @Synchronized
-    fun prepare(context: Context, folder: File): String {
+    fun prepare(context: Context, folder: File, resolution: Int): String {
         val recipe = File(context.filesDir, "piston-recipes").apply { mkdirs() }
         val profile = File(context.filesDir, "pistonport").apply { mkdirs() }
         for (name in listOf("image.json", "cars3-runtime.elf")) {
@@ -394,6 +505,7 @@ private object NativeBoot {
         }
         if (!Python.isStarted()) Python.start(AndroidPlatform(context))
         return Python.getInstance().getModule("native_boot")
-            .callAttr("build", folder.path, profile.path, recipe.path).toString()
+            .callAttr("build", folder.path, profile.path, recipe.path,
+                if (resolution == 1080) "native" else "${resolution}p").toString()
     }
 }

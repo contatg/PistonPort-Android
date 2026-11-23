@@ -13,5 +13,5 @@ def link_boot(game, output):
     link_modules.link(game, output, prepare.LINK_MODULES)
 
 
-def build(game, profile, resources):
-    return str(image_for(Path(game), Path(profile), Path(resources), link_boot))
+def build(game, profile, resources, resolution):
+    return str(image_for(Path(game), Path(profile), Path(resources), link_boot, resolution))

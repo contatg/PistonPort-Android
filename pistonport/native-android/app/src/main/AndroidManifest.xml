@@ -1,6 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-feature android:name="android.hardware.vulkan.level" android:required="true" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-feature android:name="android.hardware.vulkan.level" android:required="false" />
     <application android:label="PistonPort" android:icon="@drawable/ic_pistonport" android:allowBackup="false" android:theme="@style/Theme.PistonPort">
         <activity android:name=".HomeActivity" android:exported="true">
             <intent-filter>

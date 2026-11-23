@@ -11,12 +11,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     defaultConfig {
-        applicationId = "org.pistonport.nativeandroid.launcher"
+        applicationId = "org.pistonport.nativeandroid.hub"
         minSdk = 33
         // The original PS4 files are accessed by path using the legacy read permission.
         targetSdk = 28
-        versionCode = 3
-        versionName = "0.3-native"
+        versionCode = 4
+        versionName = "0.4-driver-hub"
         ndk { abiFilters += "arm64-v8a" }
     }
     sourceSets["main"].java.srcDir(layout.buildDirectory.dir("sdl-java"))

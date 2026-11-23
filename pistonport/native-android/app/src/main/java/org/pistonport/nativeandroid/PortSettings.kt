@@ -5,6 +5,9 @@ import android.content.Intent
 
 internal class PortSettings(context: Context) {
     private val values = context.getSharedPreferences("port-ui", Context.MODE_PRIVATE)
+    var resolution: Int
+        get() = values.getInt("resolution", 540)
+        set(value) { values.edit().putInt("resolution", value).apply() }
     var fps: Int
         get() = values.getInt("fps", 30)
         set(value) { values.edit().putInt("fps", value).apply() }

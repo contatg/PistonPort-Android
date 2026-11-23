@@ -26,13 +26,15 @@ class GameActivity : SDLActivity() {
     override fun onCreate(state: Bundle?) {
         val profile = profile(this)
         profile.mkdirs()
-        Os.setenv("PISTON_LOG_FILE", logFile(this).path, true)
+        val driverId = intent.getStringExtra("driver_id")
+        val log = if (intent.hasExtra("image")) logFile(this) else vulkanLog(this, driverId)
+        Os.setenv("PISTON_LOG_FILE", log.path, true)
         Os.setenv("SPARTAN_CONFIG", File(profile, "pistonport.ini").path, true)
         Os.setenv("SPARTAN_GPU_USER_DIR", profile.path, true)
         Os.setenv("SPARTAN_FPS_LIMIT", intent.getIntExtra("fps", 30).toString(), true)
         Os.setenv("SPARTAN_FULLSCREEN", "1", true)
-        if (intent.getBooleanExtra("turnip", false)) {
-            Os.setenv("PISTON_TURNIP_DIR", TurnipDriver.directory(this).path + "/", true)
+        if (driverId != null) {
+            Os.setenv("PISTON_TURNIP_DIR", TurnipDriver.directory(this, driverId).path + "/", true)
             Os.setenv("PISTON_DRIVER_HOOKS", applicationInfo.nativeLibraryDir + "/", true)
         } else {
             Os.unsetenv("PISTON_TURNIP_DIR")
@@ -65,5 +67,6 @@ class GameActivity : SDLActivity() {
     companion object {
         private fun profile(context: Context) = File(context.filesDir, "pistonport")
         fun logFile(context: Context) = File(profile(context), "native-last.log")
+        fun vulkanLog(context: Context, id: String?) = File(profile(context), "vulkan-${id ?: "system"}.log")
     }
 }

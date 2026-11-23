@@ -14,26 +14,47 @@ internal object TurnipDriver {
     private const val LIBRARY = "libpiston_turnip.so"
     private const val LIMIT = 128L * 1024 * 1024
 
-    fun directory(context: Context) = File(context.filesDir, "turnip")
+    data class Installed(val id: String, val name: String)
+
+    fun directory(context: Context, id: String): File {
+        require(id == "local" || Regex("[a-z0-9_-]{1,70}").matches(id))
+        return if (id == "local") File(context.filesDir, "turnip")
+        else File(File(context.filesDir, "drivers"), id)
+    }
 
     private fun preferences(context: Context) =
         context.getSharedPreferences("vulkan", Context.MODE_PRIVATE)
 
-    fun installed(context: Context) = File(directory(context), LIBRARY).isFile
+    fun selected(context: Context): String? {
+        val prefs = preferences(context)
+        val fallback = if (prefs.getBoolean("turnip", false)) "local" else ""
+        val id = prefs.getString("driver_id", fallback).orEmpty()
+        return id.takeIf { it.isNotEmpty() && File(directory(context, it), LIBRARY).isFile }
+    }
 
-    fun enabled(context: Context) =
-        preferences(context).getBoolean("turnip", false) && installed(context)
+    fun list(context: Context): List<Installed> = buildList {
+        if (File(directory(context, "local"), LIBRARY).isFile) add(Installed("local", "Turnip importado"))
+        File(context.filesDir, "drivers").listFiles().orEmpty().filter { it.isDirectory }
+            .filter { Regex("[a-z0-9_-]{1,70}").matches(it.name) && File(it, LIBRARY).isFile }
+            .sortedByDescending { it.lastModified() }.forEach {
+                add(Installed(it.name, runCatching { File(it, "name.txt").readText() }.getOrDefault(it.name)))
+            }
+    }
 
-    fun select(context: Context, enabled: Boolean) {
-        preferences(context).edit().putBoolean("turnip", enabled).apply()
+    fun select(context: Context, id: String?) {
+        preferences(context).edit().putString("driver_id", id.orEmpty()).apply()
+    }
+
+    fun install(context: Context, uri: Uri) {
+        val input = context.contentResolver.openInputStream(uri)
+            ?: error("Não foi possível abrir o arquivo do driver.")
+        install(context, input, "local", "Turnip importado")
     }
 
     @Synchronized
-    fun install(context: Context, uri: Uri) {
-        val folder = directory(context).apply { mkdirs() }
+    fun install(context: Context, input: InputStream, id: String, name: String) {
+        val folder = directory(context, id).apply { mkdirs() }
         val destination = AtomicFile(File(folder, LIBRARY))
-        val input = context.contentResolver.openInputStream(uri)
-            ?: error("Não foi possível abrir o arquivo do driver.")
         input.buffered().use { source ->
             source.mark(4)
             val magic = ByteArray(4)
@@ -49,7 +70,11 @@ internal object TurnipDriver {
                         val declared = metadata?.let {
                             require(it.size in 1..64 * 1024L) { "O meta.json do driver é inválido." }
                             zip.getInputStream(it).bufferedReader().use { reader ->
-                                JSONObject(reader.readText()).optString("libraryName").ifBlank { null }
+                                val meta = JSONObject(reader.readText())
+                                require(meta.optInt("minApi", 0) <= android.os.Build.VERSION.SDK_INT) {
+                                    "O driver exige uma versão mais recente do Android."
+                                }
+                                meta.optString("libraryName").ifBlank { null }
                             }
                         }
                         val recognized = setOf("libvulkan_freedreno.so", "vulkan.freedreno.so",
@@ -68,7 +93,9 @@ internal object TurnipDriver {
                 installElf(source, destination)
             }
         }
-        select(context, true)
+        if (id != "local") File(folder, "name.txt").writeText(name)
+        select(context, id)
+        GameActivity.vulkanLog(context, id).delete()
     }
 
     private fun installElf(input: InputStream, destination: AtomicFile) {
