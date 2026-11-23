@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -41,12 +42,12 @@ class HomeActivity : Activity() {
     private lateinit var select: Button
     private lateinit var driverStatus: TextView
     private lateinit var importDriver: Button
-    private lateinit var installedDrivers: Button
-    private lateinit var downloadDrivers: Button
-    private lateinit var homeGpu: TextView
+    private lateinit var openHub: Button
     private lateinit var settingsGpu: TextView
     private var gpuInfo: GpuInfo? = null
-    private var catalog: List<DriverCatalog.Entry>? = null
+    private val catalogs = mutableMapOf<DriverCatalog.Source, List<DriverCatalog.Entry>>()
+    private var hardwareNoticeShown = false
+    private var resumed = false
     private var editingControls = false
     private var showingVulkanLog = false
     private lateinit var testVulkan: Button
@@ -57,6 +58,7 @@ class HomeActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         settings = PortSettings(this)
+        hardwareNoticeShown = state?.getBoolean("hardware_notice_shown") == true
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(PortStyle.background)
@@ -85,12 +87,14 @@ class HomeActivity : Activity() {
                 if (!isDestroyed && !isFinishing) {
                     gpuInfo = result
                     refresh()
+                    showHardwareNotice()
                 }
             }
         }.start()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("hardware_notice_shown", hardwareNoticeShown)
         outState.putBoolean("settings_page", settingsPage.visibility == View.VISIBLE)
         outState.putBoolean("controls_page", controlsPanel.visibility == View.VISIBLE)
         super.onSaveInstanceState(outState)
@@ -134,11 +138,6 @@ class HomeActivity : Activity() {
         }
         append(game, select)
         addView(game)
-        val hardware = card("GPU e Vulkan")
-        homeGpu = PortStyle.text(this@HomeActivity, "", 14f, PortStyle.muted)
-        hardware.addView(homeGpu)
-        append(hardware, button("Abrir Hub de drivers") { showSettings(true); showControls(false) })
-        append(this, hardware)
     }
 
     private fun buildSettings(): LinearLayout = page().apply {
@@ -167,6 +166,13 @@ class HomeActivity : Activity() {
             { settings.fps }, { settings.fps = it })
         choices(rendering, "Filtragem de textura", listOf(0 to "Do jogo", 2 to "2×", 4 to "4×"),
             { settings.filtering }, { settings.filtering = it })
+        append(rendering, Switch(this@HomeActivity).apply {
+            text = "Medidor de FPS e GPU"
+            setTextColor(PortStyle.text)
+            minHeight = dp(48)
+            isChecked = settings.performanceHud
+            setOnCheckedChangeListener { _, checked -> settings.performanceHud = checked }
+        })
         addView(rendering)
         val driver = card("Hub de drivers")
         settingsGpu = PortStyle.text(this@HomeActivity, "", 14f, PortStyle.muted)
@@ -180,10 +186,8 @@ class HomeActivity : Activity() {
             }, PICK_TURNIP)
         }
         append(driver, importDriver)
-        installedDrivers = button("Drivers instalados") { chooseInstalledDriver() }
-        append(driver, installedDrivers)
-        downloadDrivers = button("Baixar drivers do GitHub") { browseDrivers() }
-        append(driver, downloadDrivers)
+        openHub = button("Abrir Hub de drivers", primary = true) { showDriverHub() }
+        append(driver, openHub)
         testVulkan = button("Testar driver selecionado") { launchVulkanTest() }
         append(driver, testVulkan)
         append(this, driver)
@@ -335,8 +339,31 @@ class HomeActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         refresh()
+        showHardwareNotice()
     }
+
+    override fun onPause() {
+        resumed = false
+        super.onPause()
+    }
+
+    private fun showHardwareNotice() {
+        val info = gpuInfo ?: return
+        if (hardwareNoticeShown || !resumed || isFinishing || isDestroyed) return
+        hardwareNoticeShown = true
+        val content = card(if (info.stockReady) "Vulkan disponível" else "Compatibilidade Vulkan")
+        content.addView(PortStyle.text(this, info.label, 15f, PortStyle.muted))
+        val dialog = panelDialog(content)
+        append(content, button("Entendi", primary = true) { dialog.dismiss() })
+        dialog.show()
+    }
+
+    private fun panelDialog(content: View): AlertDialog =
+        AlertDialog.Builder(this).setView(content).create().apply {
+            window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        }
 
     private fun refresh() {
         val folder = PistonSource.current(filesDir)
@@ -345,15 +372,13 @@ class HomeActivity : Activity() {
         val installed = TurnipDriver.list(this)
         val vulkanReport = readLog(GameActivity.vulkanLog(this, selectedDriver))
         val gpuLabel = gpuInfo?.label ?: "Detectando GPU e Vulkan…"
-        homeGpu.text = gpuLabel
         settingsGpu.text = gpuLabel
         select.isEnabled = idle
         play.isEnabled = idle && folder != null
         play.alpha = if (play.isEnabled) 1f else .6f
         importDriver.isEnabled = idle
         testVulkan.isEnabled = idle
-        installedDrivers.isEnabled = idle
-        downloadDrivers.isEnabled = idle && gpuInfo?.family != null
+        openHub.isEnabled = idle
         driverStatus.text = when {
             importingDriver -> "Consultando ou instalando driver…"
             selectedDriver == null -> "Selecionado: Vulkan do sistema"
@@ -391,48 +416,124 @@ class HomeActivity : Activity() {
         startActivity(gameIntent())
     }
 
-    private fun chooseInstalledDriver() {
-        val entries = listOf(TurnipDriver.Installed("", "Vulkan do sistema")) + TurnipDriver.list(this)
-        val selected = TurnipDriver.selected(this).orEmpty()
-        AlertDialog.Builder(this).setTitle("Drivers instalados")
-            .setSingleChoiceItems(entries.map { it.name }.toTypedArray(),
-                entries.indexOfFirst { it.id == selected }) { dialog, index ->
-                TurnipDriver.select(this, entries[index].id.ifBlank { null })
-                showingVulkanLog = true
-                dialog.dismiss()
-                refresh()
-            }.setNegativeButton("Fechar", null).show()
-    }
-
-    private fun browseDrivers() {
-        val family = gpuInfo?.family ?: return
-        catalog?.let { catalogDialog(it); return }
-        driverTask({ DriverCatalog.fetch(family) }) { entries ->
-            catalog = entries
-            catalogDialog(entries)
+    private fun showDriverHub() {
+        val family = gpuInfo?.family
+        val root = card("Hub de drivers")
+        val subtitle = family?.let { "Turnip para Adreno ${it}xx" } ?: "Drivers Vulkan"
+        root.addView(PortStyle.text(this, subtitle, 14f, PortStyle.muted))
+        val tabs = column()
+        append(root, tabs)
+        val results = column()
+        val scroll = ScrollView(this).apply {
+            addView(results)
+            isFillViewport = true
         }
-    }
+        val height = (resources.configuration.screenHeightDp - 285).coerceIn(125, 420)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, dp(height)).apply { topMargin = dp(12) })
+        val dialog = panelDialog(root)
+        val sources = listOf(null) + DriverCatalog.Source.entries
+        val buttons = mutableListOf<Button>()
+        var active: DriverCatalog.Source? = null
+        val loading = mutableSetOf<DriverCatalog.Source>()
+        val refreshCatalog = button("Atualizar") {}
+        val selected = TurnipDriver.selected(this).orEmpty()
+        val installed = TurnipDriver.list(this)
+        val installedIds = installed.map { it.id }.toSet()
 
-    private fun catalogDialog(entries: List<DriverCatalog.Entry>) {
-        val installedIds = TurnipDriver.list(this).map { it.id }.toSet()
-        val dialog = AlertDialog.Builder(this).setTitle("Turnip · Adreno ${gpuInfo?.family}xx")
-            .setNegativeButton("Fechar", null)
-            .setNeutralButton("Atualizar") { _, _ -> catalog = null; browseDrivers() }
-        if (entries.isEmpty()) dialog.setMessage("Nenhum driver para esta família no catálogo.")
-        else dialog.setItems(entries.map {
-            val size = (it.size + 1048575) / 1048576
-            "${it.name} · ${it.source} · ${if (it.id in installedIds) "Instalado" else "$size MiB"}"
-        }.toTypedArray()) { _, index ->
-            val entry = entries[index]
-            if (entry.id in installedIds) {
-                TurnipDriver.select(this, entry.id)
-                showingVulkanLog = true
-                refresh()
-            } else {
-                driverTask({ DriverCatalog.install(applicationContext, entry) }) { launchVulkanTest() }
+        fun message(label: String) {
+            append(results, PortStyle.text(this, label, 14f, PortStyle.muted))
+        }
+
+        fun selectDriver(id: String) {
+            TurnipDriver.select(this, id.ifBlank { null })
+            showingVulkanLog = true
+            dialog.dismiss()
+            refresh()
+        }
+
+        fun addDriver(id: String, name: String, detail: String, action: String, run: () -> Unit) {
+            val row = card(name)
+            row.addView(PortStyle.text(this, detail, 13f, PortStyle.muted))
+            val selectedNow = id == selected
+            append(row, button(if (selectedNow) "Selecionado" else action,
+                primary = !selectedNow && action == "Baixar e testar", click = run).apply {
+                isEnabled = !selectedNow
+                if (selectedNow) mark(this, true)
+            })
+            append(results, row)
+        }
+
+        fun display(entries: List<DriverCatalog.Entry>) {
+            results.removeAllViews()
+            if (entries.isEmpty()) message("Nenhum driver listado para esta família.")
+            for (entry in entries) {
+                val size = "%.1f MiB".format(entry.size / 1048576.0)
+                val present = entry.id in installedIds
+                val details = "${entry.source} · $size" + if (present) " · Instalado" else ""
+                addDriver(entry.id, entry.name, details, if (present) "Ativar" else "Baixar e testar") {
+                    if (present) selectDriver(entry.id)
+                    else {
+                        dialog.dismiss()
+                        driverTask({ DriverCatalog.install(applicationContext, entry) }) { launchVulkanTest() }
+                    }
+                }
             }
         }
+
+        fun show(source: DriverCatalog.Source?, force: Boolean = false) {
+            active = source
+            buttons.forEachIndexed { index, button -> mark(button, sources[index] == source) }
+            results.removeAllViews()
+            scroll.scrollTo(0, 0)
+            refreshCatalog.isEnabled = source != null && family != null
+            if (source == null) {
+                addDriver("", "Vulkan do sistema", "Driver padrão do Android", "Ativar") { selectDriver("") }
+                for (entry in installed) {
+                    addDriver(entry.id, entry.name, "Turnip instalado", "Ativar") { selectDriver(entry.id) }
+                }
+                return
+            }
+            if (family == null) {
+                message("O catálogo precisa detectar uma GPU Adreno de uma família disponível.")
+                return
+            }
+            if (!force) catalogs[source]?.let { display(it); return }
+            refreshCatalog.isEnabled = false
+            message("Carregando drivers de ${source.label}…")
+            if (!loading.add(source)) return
+            Thread {
+                val result = runCatching { DriverCatalog.fetch(source, family) }
+                runOnUiThread {
+                    loading.remove(source)
+                    result.onSuccess { catalogs[source] = it }
+                    if (isFinishing || isDestroyed || !dialog.isShowing || active != source) return@runOnUiThread
+                    refreshCatalog.isEnabled = true
+                    result.onSuccess(::display).onFailure {
+                        results.removeAllViews()
+                        message("Falha ao consultar ${source.label}. ${it.message.orEmpty()}")
+                    }
+                }
+            }.start()
+        }
+
+        for (pair in sources.chunked(2)) {
+            val row = LinearLayout(this)
+            for ((index, source) in pair.withIndex()) {
+                val tab = button(source?.label ?: "Instalados") { show(source) }
+                buttons.add(tab)
+                row.addView(tab, LinearLayout.LayoutParams(0, -2, 1f).apply {
+                    if (index > 0) marginStart = dp(6)
+                })
+            }
+            append(tabs, row)
+        }
+        refreshCatalog.setOnClickListener { show(active, force = true) }
+        val actions = LinearLayout(this)
+        actions.addView(refreshCatalog, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
+        actions.addView(button("Fechar") { dialog.dismiss() }, LinearLayout.LayoutParams(0, -2, 1f))
+        append(root, actions)
         dialog.show()
+        show(null)
     }
 
     private fun <T> driverTask(work: () -> T, success: (T) -> Unit) {

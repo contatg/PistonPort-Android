@@ -12,48 +12,49 @@ import org.json.JSONArray
 internal object DriverCatalog {
     private const val CATALOG_LIMIT = 6 * 1024 * 1024
     private const val DRIVER_LIMIT = 128 * 1024 * 1024
-    private val sources = listOf("ducvd89/Bloodborne-Android", "K11MCH1/AdrenoToolsDrivers")
+    enum class Source(val label: String, val repo: String) {
+        BLOODBORNE("Bloodborne", "ducvd89/Bloodborne-Android"),
+        ADRENO_TOOLS("AdrenoTools", "K11MCH1/AdrenoToolsDrivers"),
+        BANNERS("Banners Turnip", "The412Banner/Banners-Turnip")
+    }
+
+    private val bannersAndroid = Regex("""Turnip-v[\d.]+-\d{8}-r\d+\.zip""", RegexOption.IGNORE_CASE)
     private val downloads = setOf("github.com", "release-assets.githubusercontent.com",
         "objects.githubusercontent.com", "github-releases.githubusercontent.com")
 
     data class Entry(val id: String, val name: String, val source: String, val url: String,
         val size: Long, val digest: String, val date: String)
 
-    fun fetch(family: Int): List<Entry> {
+    fun fetch(source: Source, family: Int): List<Entry> {
         val items = mutableListOf<Entry>()
-        var reachedSource = false
-        for ((index, repo) in sources.withIndex()) {
-            runCatching {
-                open("https://api.github.com/repos/$repo/releases?per_page=50", setOf("api.github.com")) { stream ->
-                    val buffer = ByteArray(CATALOG_LIMIT + 1)
-                    val bytes = stream.readNBytes(buffer, 0, buffer.size)
-                    val data = buffer.copyOf(bytes)
-                    require(data.size <= CATALOG_LIMIT) { "Catálogo grande demais." }
-                    val releases = JSONArray(data.decodeToString())
-                    for (i in 0 until releases.length()) {
-                        val release = releases.getJSONObject(i)
-                        if (release.optBoolean("draft") || release.optBoolean("prerelease")) continue
-                        if (index == 0 && !release.optString("tag_name").startsWith("turnip-android-")) continue
-                        val assets = release.optJSONArray("assets") ?: continue
-                        for (j in 0 until assets.length()) {
-                            val asset = assets.getJSONObject(j)
-                            val name = asset.optString("name")
-                            val url = asset.optString("browser_download_url")
-                            val size = asset.optLong("size")
-                            if (!compatible(name, family) || size !in 1L..DRIVER_LIMIT.toLong() ||
-                                !url.startsWith("https://github.com/$repo/releases/download/")) continue
-                            val number = asset.optLong("id")
-                            if (number <= 0) continue
-                            items.add(Entry("github-$number", name.removeSuffix(".zip"),
-                                repo.substringAfter('/'), url, size, asset.optString("digest"),
-                                asset.optString("updated_at")))
-                        }
-                    }
-                    reachedSource = true
+        val repo = source.repo
+        open("https://api.github.com/repos/$repo/releases?per_page=30", setOf("api.github.com")) { stream ->
+            val buffer = ByteArray(CATALOG_LIMIT + 1)
+            val bytes = stream.readNBytes(buffer, 0, buffer.size)
+            require(bytes <= CATALOG_LIMIT) { "Catálogo grande demais." }
+            val releases = JSONArray(buffer.decodeToString(endIndex = bytes))
+            for (i in 0 until releases.length()) {
+                val release = releases.getJSONObject(i)
+                if (release.optBoolean("draft") || release.optBoolean("prerelease")) continue
+                if (source == Source.BLOODBORNE &&
+                    !release.optString("tag_name").startsWith("turnip-android-")) continue
+                val assets = release.optJSONArray("assets") ?: continue
+                for (j in 0 until assets.length()) {
+                    val asset = assets.getJSONObject(j)
+                    val name = asset.optString("name")
+                    val url = asset.optString("browser_download_url")
+                    val size = asset.optLong("size")
+                    val supported = if (source == Source.BANNERS)
+                        family in 6..7 && bannersAndroid.matches(name) else compatible(name, family)
+                    if (!supported || size !in 1L..DRIVER_LIMIT.toLong() ||
+                        !url.startsWith("https://github.com/$repo/releases/download/")) continue
+                    val number = asset.optLong("id")
+                    if (number <= 0) continue
+                    items.add(Entry("github-$number", name.dropLast(4),
+                        source.label, url, size, asset.optString("digest"), asset.optString("updated_at")))
                 }
             }
         }
-        check(reachedSource) { "Não foi possível consultar o GitHub. Tente novamente ou importe um ZIP." }
         return items.distinctBy(Entry::id).sortedByDescending(Entry::date).take(20)
     }
 

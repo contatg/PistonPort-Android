@@ -14,6 +14,9 @@ internal class PortSettings(context: Context) {
     var filtering: Int
         get() = values.getInt("filtering", 0)
         set(value) { values.edit().putInt("filtering", value).apply() }
+    var performanceHud: Boolean
+        get() = values.getBoolean("performance_hud", true)
+        set(value) { values.edit().putBoolean("performance_hud", value).apply() }
     var touch: Boolean
         get() = values.getBoolean("touch", true)
         set(value) { values.edit().putBoolean("touch", value).apply() }
@@ -25,5 +28,5 @@ internal class PortSettings(context: Context) {
         set(value) { values.edit().putInt("opacity", value).apply() }
 
     fun applyTo(intent: Intent): Intent = intent.putExtra("fps", fps).putExtra("filtering", filtering)
-        .putExtra("touch", touch).putExtra("control_size", size).putExtra("control_opacity", opacity)
+        .putExtra("performance_hud", performanceHud).putExtra("touch", touch).putExtra("control_size", size).putExtra("control_opacity", opacity)
 }

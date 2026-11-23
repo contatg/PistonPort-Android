@@ -185,6 +185,7 @@ jobs:
           "$llvm/bin/llvm-readelf" --dyn-syms --wide "$staging/libpistonport.so" > "$RUNNER_TEMP/piston-symbols"
           grep -E 'GLOBAL.*DEFAULT +[0-9]+ SDL_main$' "$RUNNER_TEMP/piston-symbols"
           grep -E 'GLOBAL.*DEFAULT +[0-9]+ piston_android_vulkan_loader$' "$RUNNER_TEMP/piston-symbols"
+          grep -E 'GLOBAL.*DEFAULT +[0-9]+ Java_org_pistonport_nativeandroid_PerformanceHud_presentedFrames$' "$RUNNER_TEMP/piston-symbols"
           for library in "$staging"/*.so; do
             "$llvm/bin/llvm-readelf" -h "$library" | grep -E 'Machine: +AArch64'
             "$llvm/bin/llvm-readelf" -d "$library" > "$RUNNER_TEMP/elf-deps"

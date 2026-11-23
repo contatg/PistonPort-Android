@@ -163,6 +163,28 @@ index 472be23..48d7718 100644
          dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
 +#endif
 
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
+index 4f29b10..93f0177 100644
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
+@@ -50,2 +50,6 @@
+
++#ifdef __ANDROID__
++extern "C" void piston_frame_presented(void);
++#endif
++
+ namespace Vulkan {
+@@ -1100,3 +1104,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+         std::scoped_lock submit_lock{Scheduler::submit_mutex};
+-        if (!swapchain.Present() && !window.IsMinimized() && window.GetWidth() > 0 &&
++        const bool presented = swapchain.Present();
++#ifdef __ANDROID__
++        if (presented && is_game_frame && !is_reusing_frame) {
++            piston_frame_presented();
++        }
++#endif
++        if (!presented && !window.IsMinimized() && window.GetWidth() > 0 &&
+             window.GetHeight() > 0) {
 diff --git a/gpu/shim/android_vulkan.h b/gpu/shim/android_vulkan.h
 new file mode 100644
 index 0000000..1b69ef2
@@ -215,22 +237,37 @@ index a40c4f2..ea5e1b6 100644
  #endif
 diff --git a/src/android_vulkan.c b/src/android_vulkan.c
 new file mode 100644
-index 0000000..c86ba9d
+index 0000000..c3f6ea3
 --- /dev/null
 +++ b/src/android_vulkan.c
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,159 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +#include "gpu/shim/android_vulkan.h"
 +
 +#include <adrenotools/driver.h>
 +#include <dlfcn.h>
++#include <jni.h>
 +#include <pthread.h>
++#include <stdatomic.h>
 +#include <stdio.h>
 +#include <stdlib.h>
 +#include <string.h>
 +
 +static pthread_once_t loader_once = PTHREAD_ONCE_INIT;
 +static PFN_vkGetInstanceProcAddr loader;
++
++static atomic_llong presented_frames;
++
++void piston_frame_presented(void) {
++    atomic_fetch_add_explicit(&presented_frames, 1, memory_order_relaxed);
++}
++
++JNIEXPORT jlong JNICALL
++Java_org_pistonport_nativeandroid_PerformanceHud_presentedFrames(JNIEnv *env, jobject hud) {
++    (void)env;
++    (void)hud;
++    return atomic_load_explicit(&presented_frames, memory_order_relaxed);
++}
 +
 +static void init_loader(void) {
 +    const char *directory = getenv("PISTON_TURNIP_DIR");

@@ -4,12 +4,14 @@ import android.content.Context
 import android.os.Bundle
 import android.os.Process
 import android.system.Os
+import android.view.Gravity
 import android.widget.FrameLayout
 import java.io.File
 import org.libsdl.app.SDLActivity
 
 class GameActivity : SDLActivity() {
     private var hud: RaceControls? = null
+    private var performance: PerformanceHud? = null
 
     override fun getLibraries() = arrayOf("SDL3", "pistonport")
 
@@ -52,14 +54,27 @@ class GameActivity : SDLActivity() {
                 ))
             }
         }
+        if (!mBrokenLibraries && intent.hasExtra("image") && intent.getBooleanExtra("performance_hud", true)) {
+            performance = PerformanceHud(this).also {
+                addContentView(it, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL)
+                    .apply { topMargin = dp(12) })
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        performance?.start()
     }
 
     override fun onPause() {
+        performance?.stop()
         hud?.release()
         super.onPause()
     }
 
     override fun onDestroy() {
+        performance?.close()
         super.onDestroy()
         if (isFinishing) Process.killProcess(Process.myPid())
     }
