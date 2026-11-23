@@ -6,6 +6,10 @@ plugins {
 android {
     namespace = "org.pistonport.nativeandroid"
     compileSdk = 36
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
     defaultConfig {
         applicationId = "org.pistonport.nativeandroid"
         minSdk = 33
@@ -19,6 +23,8 @@ android {
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("native-libs"))
     packaging { jniLibs { useLegacyPackaging = false } }
 }
+
+kotlin { jvmToolchain(17) }
 
 chaquopy {
     defaultConfig {
