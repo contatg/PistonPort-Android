@@ -11,15 +11,16 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
-internal class PerformanceHud(context: Context) : FrameLayout(context) {
-    private val readout = PortStyle.text(context, "FPS —    GPU —", 12f, bold = true)
+// Compact FPS, frame time and upscaler readout follows Bloodborne-Android's FpsCounter.
+internal class PerformanceHud(context: Context, private val upscaler: String) : FrameLayout(context) {
+    private val readout = PortStyle.text(context, "— FPS", 13f, bold = true)
     private val worker = Executors.newSingleThreadScheduledExecutor()
     private val sensors = AdrenoLoad()
     private var samples: ScheduledFuture<*>? = null
     private var generation = 0
 
     init {
-        background = PortStyle.panel(context, 0xe61c181e.toInt(), 12, PortStyle.accent)
+        background = PortStyle.panel(context, 0x8014151b.toInt(), 8)
         setPadding(context.dp(12), context.dp(6), context.dp(12), context.dp(6))
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         addView(readout)
@@ -33,18 +34,24 @@ internal class PerformanceHud(context: Context) : FrameLayout(context) {
         samples = worker.scheduleWithFixedDelay({
             val now = SystemClock.elapsedRealtime()
             val count = presentedFrames()
-            val fps = if (now > lastTime && count > 0)
-                (count - lastCount) * 1000.0 / (now - lastTime) else null
+            val elapsed = now - lastTime
+            val total = (count and 0xffffffffL) - (lastCount and 0xffffffffL)
+            val real = (count ushr 32) - (lastCount ushr 32)
+            val fps = if (elapsed > 0 && count != 0L) total * 1000.0 / elapsed else null
             lastCount = count
             lastTime = now
             val gpu = sensors.sample()
-            val rate = fps?.let { String.format(Locale.getDefault(), "%.1f", it) } ?: "—"
-            val frameTime = fps?.takeIf { it > 0 }?.let {
-                String.format(Locale.getDefault(), "    %.1f ms", 1000 / it)
-            }.orEmpty()
-            val gpuLabel = gpu?.let { "$it%" } ?: "—"
+            val label = buildString {
+                append(fps?.let { String.format(Locale.getDefault(), "%.0f FPS", it) } ?: "— FPS")
+                if (fps != null && fps > 0) append(String.format(Locale.getDefault(), "  %.1f ms", 1000 / fps))
+                if (real < total && elapsed > 0) {
+                    append(String.format(Locale.getDefault(), "  (%.0f base + FG)", real * 1000.0 / elapsed))
+                }
+                if (upscaler.isNotEmpty()) append("  $upscaler")
+                append(if (gpu == null) "\nGPU —" else "\nGPU $gpu%")
+            }
             post {
-                if (active == generation) readout.text = "FPS $rate$frameTime    GPU $gpuLabel"
+                if (active == generation) readout.text = label
             }
         }, 1, 1, TimeUnit.SECONDS)
     }

@@ -9,6 +9,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".TouchLayoutActivity" android:exported="false"
+            android:screenOrientation="sensorLandscape" />
         <activity android:name=".GameActivity" android:exported="false" android:process=":game"
             android:screenOrientation="sensorLandscape"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode|locale|layoutDirection|fontScale|fontWeightAdjustment|density" />

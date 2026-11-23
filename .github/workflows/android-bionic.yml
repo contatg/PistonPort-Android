@@ -168,6 +168,17 @@ jobs:
           path: ~/.cache/ccache
           key: piston-bionic-ccache-${{ runner.os }}-${{ env.NDK_VERSION }}-${{ github.sha }}
 
+      - name: Build Bloodframe for Android
+        run: |
+          src="$RUNNER_TEMP/bloodframe"
+          git init "$src"
+          git -C "$src" remote add origin https://github.com/ducvd89/bloodframe.git
+          git -C "$src" fetch --depth 1 origin f4ac713aef58d9403a136e179b3b0d163d85eb66
+          git -C "$src" checkout --detach FETCH_HEAD
+          cmp "$src/android/bb_lsfg.h" "$RUNNER_TEMP/spartanport/gpu/shim/bb_lsfg.h"
+          "$src/build-android.sh" --ndk "$ANDROID_HOME/ndk/$NDK_VERSION" \
+            --api "$ANDROID_API" --out "$RUNNER_TEMP/bloodframe-out" --jobs 4
+
       - name: Verify and stage the native Android libraries
         run: |
           ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
@@ -178,6 +189,7 @@ jobs:
           "$llvm/bin/llvm-strip" -o "$staging/libpistonport.so" "$RUNNER_TEMP/bionic-game/libpistonport.so"
           "$llvm/bin/llvm-strip" -o "$staging/libgportcpu.so" "$RUNNER_TEMP/bionic-cpu/libgportcpu.so"
           cp "$prefix/lib/libSDL3.so" "$staging/"
+          cp "$RUNNER_TEMP/bloodframe-out/lib/libbloodframe.so" "$staging/"
           cp "$RUNNER_TEMP/bionic-game/adrenotools/src/hook/"{libmain_hook,libhook_impl}.so "$staging/"
           cp "$llvm/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" "$staging/"
           "$llvm/bin/aarch64-linux-android$ANDROID_API-clang" -std=c11 -O2 -shared -fPIC \
@@ -186,6 +198,7 @@ jobs:
           grep -E 'GLOBAL.*DEFAULT +[0-9]+ SDL_main$' "$RUNNER_TEMP/piston-symbols"
           grep -E 'GLOBAL.*DEFAULT +[0-9]+ piston_android_vulkan_loader$' "$RUNNER_TEMP/piston-symbols"
           grep -E 'GLOBAL.*DEFAULT +[0-9]+ Java_org_pistonport_nativeandroid_PerformanceHud_presentedFrames$' "$RUNNER_TEMP/piston-symbols"
+          grep -E 'GLOBAL.*DEFAULT +[0-9]+ Java_org_pistonport_nativeandroid_GameActivity_updateTouch$' "$RUNNER_TEMP/piston-symbols"
           for library in "$staging"/*.so; do
             "$llvm/bin/llvm-readelf" -h "$library" | grep -E 'Machine: +AArch64'
             "$llvm/bin/llvm-readelf" -d "$library" > "$RUNNER_TEMP/elf-deps"
@@ -241,6 +254,9 @@ jobs:
           cp -R "$sdl/android-project/app/src/main/java/." "$generated/"
           install -D -m 0644 PistonSource.kt "$generated/ro/cobrabm/fexdroid/PistonSource.kt"
           cp "$RUNNER_TEMP/native-runtime/"*.so "$jni/"
+          mkdir -p app/src/main/assets/licenses
+          cp "$RUNNER_TEMP/bloodframe-out/licenses/"* app/src/main/assets/licenses/
+          cp ../LICENSE.txt CREDITS.md app/src/main/assets/licenses/
           gradle --no-daemon :app:assembleDebug
           apk=app/build/outputs/apk/debug/app-debug.apk
           sdk_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
@@ -252,7 +268,7 @@ jobs:
 
           with ZipFile(sys.argv[1]) as apk:
               files = set(apk.namelist())
-              expected = {"libpistonport.so", "libgportcpu.so", "libSDL3.so", "libc++_shared.so", "libmain_hook.so", "libhook_impl.so", "libpiston_gpu_info.so"}
+              expected = {"libpistonport.so", "libgportcpu.so", "libSDL3.so", "libc++_shared.so", "libmain_hook.so", "libhook_impl.so", "libpiston_gpu_info.so", "libbloodframe.so"}
               assert {f"lib/arm64-v8a/{name}" for name in expected} <= files
               assert {"AndroidManifest.xml", "classes.dex", "assets/image.json", "assets/cars3-runtime.elf"} <= files
               assert all(not name.startswith("assets/rootfs") for name in files)

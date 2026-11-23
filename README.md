@@ -53,3 +53,5 @@ O empacotador produz `PistonPort-Android-nixport.zip` quando recebe o construtor
 ## Credits
 
 PistonPort uses SpartanPort’s loader, shadPS4’s Vulkan renderer, and Rune for the launcher. [SpartanPort](https://github.com/FelipePrado0/SpartanPort) · [shadPS4](https://github.com/shadps4-emu/shadPS4) · [Rune](https://github.com/anomalyco/rune) · [License](LICENSE)
+
+Mais detalhes nos [créditos da versão Android](pistonport/native-android/CREDITS.md).

@@ -13,7 +13,8 @@ internal object DriverCatalog {
     private const val CATALOG_LIMIT = 6 * 1024 * 1024
     private const val DRIVER_LIMIT = 128 * 1024 * 1024
     enum class Source(val label: String, val repo: String) {
-        BLOODBORNE("Bloodborne", "ducvd89/Bloodborne-Android"),
+        STEVEN("StevenMXZ", "StevenMXZ/Adreno-Tools-Drivers"),
+        PURPLE("Mesa Purple", "MrPurple666/purple-turnip"),
         ADRENO_TOOLS("AdrenoTools", "K11MCH1/AdrenoToolsDrivers"),
         BANNERS("Banners Turnip", "The412Banner/Banners-Turnip")
     }
@@ -36,26 +37,35 @@ internal object DriverCatalog {
             for (i in 0 until releases.length()) {
                 val release = releases.getJSONObject(i)
                 if (release.optBoolean("draft") || release.optBoolean("prerelease")) continue
-                if (source == Source.BLOODBORNE &&
-                    !release.optString("tag_name").startsWith("turnip-android-")) continue
                 val assets = release.optJSONArray("assets") ?: continue
                 for (j in 0 until assets.length()) {
                     val asset = assets.getJSONObject(j)
                     val name = asset.optString("name")
                     val url = asset.optString("browser_download_url")
                     val size = asset.optLong("size")
-                    val supported = if (source == Source.BANNERS)
-                        family in 6..7 && bannersAndroid.matches(name) else compatible(name, family)
+                    val supported = when (source) {
+                        Source.PURPLE -> purpleCompatible(name, release.optString("body"), family)
+                        Source.BANNERS -> family in 6..7 && bannersAndroid.matches(name)
+                        else -> compatible(name, family)
+                    }
                     if (!supported || size !in 1L..DRIVER_LIMIT.toLong() ||
                         !url.startsWith("https://github.com/$repo/releases/download/")) continue
                     val number = asset.optLong("id")
                     if (number <= 0) continue
-                    items.add(Entry("github-$number", name.dropLast(4),
+                    items.add(Entry("github-$number", name.substringBeforeLast('.'),
                         source.label, url, size, asset.optString("digest"), asset.optString("updated_at")))
                 }
             }
         }
         return items.distinctBy(Entry::id).sortedByDescending(Entry::date).take(20)
+    }
+
+    private fun purpleCompatible(name: String, notes: String, family: Int): Boolean {
+        val asset = name.lowercase()
+        if (!asset.startsWith("turnip") || (!asset.endsWith(".adpkg") && !asset.endsWith(".zip"))) return false
+        val familyMark = "a${family}xx"
+        val declared = notes.lineSequence().firstOrNull { "unified:" in it.lowercase() }
+        return if (declared != null) familyMark in declared.lowercase() else compatible(asset.removeSuffix(".adpkg") + if (asset.endsWith(".adpkg")) ".zip" else "", family)
     }
 
     private fun compatible(name: String, family: Int): Boolean {

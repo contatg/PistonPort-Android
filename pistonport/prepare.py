@@ -11,6 +11,8 @@ from pathlib import Path
 TARGET_HASH = "56d27cc83b7fe34921fb07413dd7c8fb255daf357a3f81c2d882969f001ff654"
 LINK_MODULES = ("libc.prx", "libSceFios2.prx", "libSceNpToolkit2.prx")
 RESOLUTIONS = {
+    "360p": (640, 360),
+    "480p": (854, 480),
     "540p": (960, 540),
     "720p": (1280, 720),
     "1280x800": (1280, 800),
@@ -24,6 +26,10 @@ RESOLUTIONS = {
     "4K": (3840, 2160),
 }
 _RESOLUTION_ALIASES = {
+    "360p": "360p",
+    "640x360": "360p",
+    "480p": "480p",
+    "854x480": "480p",
     "540p": "540p",
     "960x540": "540p",
     "720p": "720p",

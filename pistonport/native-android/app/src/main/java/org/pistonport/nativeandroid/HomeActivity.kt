@@ -16,6 +16,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Switch
 import com.chaquo.python.Python
@@ -34,8 +35,6 @@ class HomeActivity : Activity() {
     private lateinit var controlsTab: Button
     private lateinit var graphicsPanel: LinearLayout
     private lateinit var controlsPanel: LinearLayout
-    private lateinit var preview: FrameLayout
-    private lateinit var editPositions: Button
     private lateinit var status: TextView
     private lateinit var diagnostics: TextView
     private lateinit var play: Button
@@ -48,12 +47,15 @@ class HomeActivity : Activity() {
     private val catalogs = mutableMapOf<DriverCatalog.Source, List<DriverCatalog.Entry>>()
     private var hardwareNoticeShown = false
     private var resumed = false
-    private var editingControls = false
     private var showingVulkanLog = false
     private lateinit var testVulkan: Button
     private var importingDriver = false
     private var selecting = false
     private var preparing = false
+    private var frameAssetBusy = false
+    private lateinit var frameAssets: TextView
+    private lateinit var importLossless: Button
+    private lateinit var downloadMako: Button
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -159,13 +161,25 @@ class HomeActivity : Activity() {
     }
 
     private fun buildGraphics(): LinearLayout = column().apply {
-        val rendering = card("Desempenho")
-        choices(rendering, "Resolução interna", listOf(540 to "540p", 720 to "720p", 1080 to "1080p"),
+        val rendering = card("Imagem e desempenho")
+        menuChoice(rendering, "Resolução interna", listOf(
+            360 to "360p", 480 to "480p", 540 to "540p", 720 to "720p",
+            900 to "900p", 1080 to "1080p", 1440 to "1440p"),
             { settings.resolution }, { settings.resolution = it })
-        choices(rendering, "Limite de FPS", listOf(30 to "30 FPS", 60 to "60 FPS"),
+        graphicsChoice(rendering, "Saída do upscaler", "output", 1080,
+            listOf(540 to "540p", 720 to "720p", 900 to "900p", 1080 to "1080p", 1440 to "1440p"))
+        graphicsChoice(rendering, "Proporção da imagem", "aspect", 0,
+            aspectRatios.mapIndexed { index, aspect -> index to if (index == 0) "Automática" else aspect })
+        graphicsChoice(rendering, "Upscaler", "upscaler", 0,
+            listOf(0 to "Desligado", 1 to "FSR 3.1", 2 to "TAA"))
+        graphicsChoice(rendering, "Qualidade do upscaler", "preset", 3, listOf(
+            0 to "Nativa", 5 to "Ultra qualidade", 1 to "Qualidade",
+            2 to "Equilibrado", 3 to "Desempenho", 4 to "Ultra desempenho"))
+        graphicsSlider(rendering, "Nitidez", "sharpness", 0, 100, 20)
+        menuChoice(rendering, "Limite de FPS", listOf(
+            30 to "30 FPS", 40 to "40 FPS", 45 to "45 FPS", 60 to "60 FPS", 0 to "Sem limite"),
             { settings.fps }, { settings.fps = it })
-        choices(rendering, "Filtragem de textura", listOf(0 to "Do jogo", 2 to "2×", 4 to "4×"),
-            { settings.filtering }, { settings.filtering = it })
+        graphicsToggle(rendering, "VSync", "vsync", true)
         append(rendering, Switch(this@HomeActivity).apply {
             text = "Medidor de FPS e GPU"
             setTextColor(PortStyle.text)
@@ -174,6 +188,45 @@ class HomeActivity : Activity() {
             setOnCheckedChangeListener { _, checked -> settings.performanceHud = checked }
         })
         addView(rendering)
+
+        val effects = card("Efeitos gráficos")
+        graphicsToggle(effects, "Bloom", "bloom", true)
+        graphicsToggle(effects, "Profundidade de campo", "dof", true)
+        graphicsToggle(effects, "Desfoque de movimento", "motion_blur", true)
+        graphicsToggle(effects, "Sombras", "shadows", true)
+        graphicsToggle(effects, "Compilar shaders em segundo plano", "async", true)
+        graphicsChoice(effects, "Qualidade das texturas", "texture", 0,
+            listOf(0 to "Alta (do jogo)", 1 to "Média", 2 to "Baixa", 3 to "Muito baixa"))
+        choices(effects, "Filtragem de textura", listOf(0 to "Do jogo", 2 to "2×", 4 to "4×", 8 to "8×", 16 to "16×"),
+            { settings.filtering }, { settings.filtering = it })
+        append(this, effects)
+
+        val frame = card("Geração de quadros")
+        graphicsChoice(frame, "Método", "framegen", 0, listOf(0 to "Desligado", 1 to "FSR 3.1 · 2×",
+            2 to "Bloodframe · 2×", 3 to "Bloodframe · 3×", 4 to "Bloodframe · 4×"))
+        graphicsChoice(frame, "Modelo Bloodframe", "fg_model", 0,
+            listOf(0 to "Lossless Scaling", 1 to "MAKO-FG experimental"))
+        graphicsSlider(frame, "Escala de movimento", "fg_flow", 25, 100, 75)
+        graphicsToggle(frame, "Modo desempenho", "fg_fast", true)
+        graphicsToggle(frame, "Meia precisão (FP16)", "fg_fp16", true)
+        frameAssets = PortStyle.text(this@HomeActivity, "", 13f, PortStyle.muted)
+        append(frame, frameAssets)
+        importLossless = button("Importar Lossless.dll") {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+            }, PICK_LOSSLESS)
+        }
+        append(frame, importLossless)
+        downloadMako = button("Baixar modelo MAKO-FG") {
+            AlertDialog.Builder(this@HomeActivity).setTitle("MAKO-FG de Eugenio Segala")
+                .setMessage("Modelo CC BY-NC 4.0 para uso não comercial em pesquisa e educação. Requer um driver com AHardwareBuffer e sincronização Vulkan por arquivos.")
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Baixar") { _, _ -> frameAssetTask { FrameGenAssets.installMako(graphicsProfile()) } }
+                .show()
+        }
+        append(frame, downloadMako)
+        append(this, frame)
         val driver = card("Hub de drivers")
         settingsGpu = PortStyle.text(this@HomeActivity, "", 14f, PortStyle.muted)
         driver.addView(settingsGpu)
@@ -211,38 +264,12 @@ class HomeActivity : Activity() {
             setOnCheckedChangeListener { _, checked -> settings.touch = checked }
         }
         card.addView(toggle)
-        choices(card, "Tamanho", listOf(85 to "Pequeno", 100 to "Médio", 115 to "Grande"),
-            { settings.size }, { settings.size = it; updatePreview() })
         choices(card, "Opacidade", listOf(55 to "55%", 70 to "70%", 85 to "85%", 100 to "100%"),
-            { settings.opacity }, { settings.opacity = it; updatePreview() })
-        addView(card)
-        val previewFrame = card("Prévia interativa")
-        preview = FrameLayout(this@HomeActivity).apply {
-            background = PortStyle.panel(this@HomeActivity, PortStyle.background, 16, PortStyle.border)
-            clipToOutline = true
-            addView(RaceBanner(this@HomeActivity).apply { alpha = .25f }, FrameLayout.LayoutParams(-1, -1))
-        }
-        previewFrame.addView(preview, LinearLayout.LayoutParams(-1, dp(178)))
-        editPositions = button("Editar posições") {
-            editingControls = !editingControls
-            val editor = preview.getChildAt(1) as RaceControls
-            editor.editing = editingControls
-            editPositions.text =
-                if (editingControls) "Concluir edição" else "Editar posições"
-        }
-        append(previewFrame, editPositions)
-        append(previewFrame, button("Restaurar posições") {
-            (preview.getChildAt(1) as RaceControls).resetLayout()
+            { settings.opacity }, { settings.opacity = it })
+        append(card, button("Editar layout em tela cheia") {
+            startActivity(Intent(this@HomeActivity, TouchLayoutActivity::class.java))
         })
-        append(this, previewFrame)
-        updatePreview()
-    }
-
-    private fun updatePreview() {
-        if (preview.childCount > 1) preview.removeViewAt(1)
-        preview.addView(RaceControls(this, settings.size, settings.opacity) { _, _ -> }.apply {
-            editing = editingControls
-        }, FrameLayout.LayoutParams(-1, -1))
+        addView(card)
     }
 
     private fun showSettings(visible: Boolean) {
@@ -316,9 +343,90 @@ class HomeActivity : Activity() {
         append(parent, row)
     }
 
+    private fun menuChoice(parent: LinearLayout, title: String, options: List<Pair<Int, String>>,
+        selected: () -> Int, save: (Int) -> Unit) {
+        fun label() = "$title · " + (options.firstOrNull { it.first == selected() } ?: options.first()).second
+        lateinit var control: Button
+        control = button(label()) {
+            AlertDialog.Builder(this).setTitle(title)
+                .setSingleChoiceItems(options.map { it.second }.toTypedArray(),
+                    options.indexOfFirst { it.first == selected() }) { dialog, index ->
+                    save(options[index].first)
+                    control.text = label()
+                    dialog.dismiss()
+                }.setNegativeButton("Fechar", null).show()
+        }
+        append(parent, control)
+    }
+
+    private fun graphicsChoice(parent: LinearLayout, title: String, key: String, default: Int,
+        options: List<Pair<Int, String>>) =
+        menuChoice(parent, title, options, { settings.choice(key, default) }, { settings.setChoice(key, it) })
+
+    private fun graphicsToggle(parent: LinearLayout, title: String, key: String, default: Boolean) {
+        append(parent, Switch(this).apply {
+            text = title
+            setTextColor(PortStyle.text)
+            minHeight = dp(42)
+            isChecked = settings.toggle(key, default)
+            setOnCheckedChangeListener { _, checked -> settings.setToggle(key, checked) }
+        })
+    }
+
+    private fun graphicsSlider(parent: LinearLayout, title: String, key: String,
+        min: Int, max: Int, default: Int) {
+        val initial = settings.choice(key, default)
+        val caption = PortStyle.text(this, "$title · $initial%", 14f, PortStyle.muted)
+        append(parent, caption)
+        append(parent, SeekBar(this).apply {
+            this.max = max - min
+            progress = initial - min
+            contentDescription = title
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
+                    caption.text = "$title · ${min + value}%"
+                    if (fromUser) settings.setChoice(key, min + value)
+                }
+
+                override fun onStartTrackingTouch(bar: SeekBar) = Unit
+                override fun onStopTrackingTouch(bar: SeekBar) = Unit
+            })
+        })
+    }
+
+    private fun graphicsProfile() = File(filesDir, "pistonport")
+
+    private fun frameAssetTask(work: () -> Unit) {
+        frameAssetBusy = true
+        refresh()
+        Thread {
+            val result = runCatching(work)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                frameAssetBusy = false
+                refresh()
+                result.exceptionOrNull()?.let { frameAssets.text = it.message ?: "Falha ao instalar o modelo." }
+            }
+        }.start()
+    }
+
     private fun playGame() {
         val folder = PistonSource.current(filesDir) ?: return
         val selectedResolution = settings.resolution
+        val generation = settings.choice("framegen", 0)
+        val profile = graphicsProfile()
+        if (generation >= 2) {
+            val mako = settings.choice("fg_model", 0) == 1
+            val ready = if (mako) FrameGenAssets.makoInstalled(profile) else FrameGenAssets.lossless(profile).isFile
+            if (!ready) {
+                panelDialog(card("Bloodframe").apply {
+                    addView(PortStyle.text(this@HomeActivity,
+                        if (mako) "Baixe MAKO-FG em Gráficos → Geração de quadros."
+                        else "Importe sua Lossless.dll em Gráficos → Geração de quadros.", 15f, PortStyle.muted))
+                }).show()
+                return
+            }
+        }
         showingVulkanLog = false
         preparing = true
         refresh()
@@ -367,7 +475,7 @@ class HomeActivity : Activity() {
 
     private fun refresh() {
         val folder = PistonSource.current(filesDir)
-        val idle = !selecting && !preparing && !importingDriver
+        val idle = !selecting && !preparing && !importingDriver && !frameAssetBusy
         val selectedDriver = TurnipDriver.selected(this)
         val installed = TurnipDriver.list(this)
         val vulkanReport = readLog(GameActivity.vulkanLog(this, selectedDriver))
@@ -379,6 +487,13 @@ class HomeActivity : Activity() {
         importDriver.isEnabled = idle
         testVulkan.isEnabled = idle
         openHub.isEnabled = idle
+        importLossless.isEnabled = idle
+        downloadMako.isEnabled = idle && !FrameGenAssets.makoInstalled(graphicsProfile())
+        frameAssets.text = if (frameAssetBusy) "Instalando arquivo de framegen…" else {
+            val lossless = if (FrameGenAssets.lossless(graphicsProfile()).isFile) "importada" else "pendente"
+            val mako = if (FrameGenAssets.makoInstalled(graphicsProfile())) "instalado" else "pendente"
+            "Lossless.dll · $lossless\nMAKO-FG · $mako"
+        }
         driverStatus.text = when {
             importingDriver -> "Consultando ou instalando driver…"
             selectedDriver == null -> "Selecionado: Vulkan do sistema"
@@ -428,7 +543,7 @@ class HomeActivity : Activity() {
             addView(results)
             isFillViewport = true
         }
-        val height = (resources.configuration.screenHeightDp - 285).coerceIn(125, 420)
+        val height = (resources.configuration.screenHeightDp - 325).coerceIn(125, 420)
         root.addView(scroll, LinearLayout.LayoutParams(-1, dp(height)).apply { topMargin = dp(12) })
         val dialog = panelDialog(root)
         val sources = listOf(null) + DriverCatalog.Source.entries
@@ -569,6 +684,10 @@ class HomeActivity : Activity() {
         super.onActivityResult(code, result, data)
         val uri = data?.data ?: return
         if (result != RESULT_OK || selecting || preparing || importingDriver) return
+        if (code == PICK_LOSSLESS) {
+            frameAssetTask { FrameGenAssets.importDll(applicationContext, graphicsProfile(), uri) }
+            return
+        }
         if (code == PICK_TURNIP) {
             driverTask({ TurnipDriver.install(applicationContext, uri) }) { launchVulkanTest() }
             return
@@ -591,6 +710,7 @@ class HomeActivity : Activity() {
         const val STORAGE = 1
         const val PICK_FOLDER = 2
         const val PICK_TURNIP = 3
+        const val PICK_LOSSLESS = 4
     }
 }
 

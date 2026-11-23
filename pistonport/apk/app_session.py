@@ -15,7 +15,7 @@ RUNTIME = Path(__file__).resolve().parent
 
 
 def image_for(game, profile, resources=RUNTIME, link_boot=None, resolution="540p"):
-    if resolution not in ("540p", "720p", "native"):
+    if resolution not in ("360p", "480p", "540p", "720p", "900p", "native", "1440p"):
         raise ValueError("Resolução interna não suportada.")
     prepare.check_game_folder(game)
     manifest = json.loads((resources / "image.json").read_text(encoding="utf-8"))
