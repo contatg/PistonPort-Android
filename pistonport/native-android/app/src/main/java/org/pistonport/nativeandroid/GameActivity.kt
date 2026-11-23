@@ -16,21 +16,16 @@ class GameActivity : SDLActivity() {
     override fun getLibraries() = arrayOf("SDL3", "pistonport")
 
     override fun getArguments(): Array<String> {
-        val folder = intent.getStringExtra("folder")
-        val image = intent.getStringExtra("image")
-        return if (folder != null && image != null) {
-            arrayOf(image, "--app0", folder, "--user", profile(this).path, "--timeout", "0")
-        } else {
-            arrayOf("--vulkan-only")
-        }
+        val folder = requireNotNull(intent.getStringExtra("folder"))
+        val image = requireNotNull(intent.getStringExtra("image"))
+        return arrayOf(image, "--app0", folder, "--user", profile(this).path, "--timeout", "0")
     }
 
     override fun onCreate(state: Bundle?) {
         val profile = profile(this)
         profile.mkdirs()
         val driverId = intent.getStringExtra("driver_id")
-        val log = if (intent.hasExtra("image")) logFile(this) else vulkanLog(this, driverId)
-        Os.setenv("PISTON_LOG_FILE", log.path, true)
+        Os.setenv("PISTON_LOG_FILE", logFile(this).path, true)
         Os.setenv("SPARTAN_CONFIG", File(profile, "pistonport.ini").path, true)
         Os.setenv("SPARTAN_GPU_USER_DIR", profile.path, true)
         Os.setenv("SPARTAN_FPS_LIMIT", intent.getIntExtra("fps", 30).toString(), true)
@@ -45,7 +40,7 @@ class GameActivity : SDLActivity() {
         Os.setenv("SPARTAN_ANISOTROPY", intent.getIntExtra("filtering", 0).toString(), true)
         configureGraphics(profile)
         super.onCreate(state)
-        if (!mBrokenLibraries && intent.hasExtra("image") && intent.getBooleanExtra("touch", true)) {
+        if (!mBrokenLibraries && intent.getBooleanExtra("touch", true)) {
             hud = TouchControllerOverlay(this) { buttons, lx, ly, rx, ry, left, right, l2, r2 ->
                 val mask = buttons.fold(0) { bits, button -> bits or (touchButtons[button] ?: 0) }
                 updateTouch(mask, lx, ly, rx, ry, left, right, l2, r2)
@@ -54,7 +49,7 @@ class GameActivity : SDLActivity() {
                 addContentView(controls, FrameLayout.LayoutParams(-1, -1))
             }
         }
-        if (!mBrokenLibraries && intent.hasExtra("image") && intent.getBooleanExtra("performance_hud", true)) {
+        if (!mBrokenLibraries && intent.getBooleanExtra("performance_hud", true)) {
             performance = PerformanceHud(this, when (intent.getIntExtra("upscaler", 0)) {
                 1 -> "FSR 3.1"
                 2 -> "TAA"
@@ -140,6 +135,5 @@ class GameActivity : SDLActivity() {
 
         private fun profile(context: Context) = File(context.filesDir, "pistonport")
         fun logFile(context: Context) = File(profile(context), "native-last.log")
-        fun vulkanLog(context: Context, id: String?) = File(profile(context), "vulkan-${id ?: "system"}.log")
     }
 }

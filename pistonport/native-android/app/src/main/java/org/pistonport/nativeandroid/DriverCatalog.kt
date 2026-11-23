@@ -82,7 +82,7 @@ internal object DriverCatalog {
         }
     }
 
-    fun install(context: Context, entry: Entry) {
+    fun install(context: Context, entry: Entry, report: (String) -> Unit) {
         val temporary = File.createTempFile("turnip-download-", ".zip", context.cacheDir)
         try {
             val sha = MessageDigest.getInstance("SHA-256")
@@ -90,6 +90,7 @@ internal object DriverCatalog {
                 temporary.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     var total = 0L
+                    var lastProgress = 0
                     while (true) {
                         val read = input.read(buffer)
                         if (read < 0) break
@@ -97,10 +98,16 @@ internal object DriverCatalog {
                         require(total <= entry.size) { "O download tem tamanho inesperado." }
                         sha.update(buffer, 0, read)
                         output.write(buffer, 0, read)
+                        val progress = (total * 100 / entry.size).toInt()
+                        if (progress >= lastProgress + 5) {
+                            lastProgress = progress
+                            report("Baixando ${entry.name} · $progress%")
+                        }
                     }
                     require(total == entry.size) { "O download do driver está incompleto." }
                 }
             }
+            report("Verificando e instalando ${entry.name}…")
             val digest = sha.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
             if (entry.digest.startsWith("sha256:")) {
                 require(entry.digest.equals("sha256:$digest", ignoreCase = true)) { "O SHA-256 do driver não confere." }
@@ -122,6 +129,7 @@ internal object DriverCatalog {
                 connection.connectTimeout = 12000
                 connection.readTimeout = 20000
                 connection.setRequestProperty("User-Agent", "PistonPort-Android")
+                connection.setRequestProperty("Accept-Encoding", "identity")
                 val status = connection.responseCode
                 if (status in listOf(301, 302, 303, 307, 308)) {
                     url = URL(url, connection.getHeaderField("Location") ?: error("Redirecionamento inválido."))

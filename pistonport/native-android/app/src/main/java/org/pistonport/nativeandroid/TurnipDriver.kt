@@ -7,6 +7,7 @@ import java.io.DataInputStream
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import org.json.JSONObject
 
@@ -65,25 +66,7 @@ internal object TurnipDriver {
                 try {
                     archive.outputStream().use { copyLimited(source, it) }
                     ZipFile(archive).use { zip ->
-                        val library = zip.entries().asSequence().filter { !it.isDirectory }.toList()
-                        val metadata = library.singleOrNull { it.name.substringAfterLast('/') == "meta.json" }
-                        val declared = metadata?.let {
-                            require(it.size in 1..64 * 1024L) { "O meta.json do driver é inválido." }
-                            zip.getInputStream(it).bufferedReader().use { reader ->
-                                val meta = JSONObject(reader.readText())
-                                require(meta.optInt("minApi", 0) <= android.os.Build.VERSION.SDK_INT) {
-                                    "O driver exige uma versão mais recente do Android."
-                                }
-                                meta.optString("libraryName").ifBlank { null }
-                            }
-                        }
-                        val recognized = setOf("libvulkan_freedreno.so", "vulkan.freedreno.so",
-                            "vulkan.turnip.so", "libvulkan_turnip.so", "vulkan.adreno.so")
-                        val entry = library.singleOrNull {
-                            val name = it.name.substringAfterLast('/')
-                            if (declared != null) name == declared.substringAfterLast('/') else name in recognized
-                        } ?: error("O ZIP precisa conter uma biblioteca Vulkan do Turnip.")
-                        require(entry.size in 20..LIMIT) { "A biblioteca do Turnip tem tamanho inválido." }
+                        val entry = findLibrary(zip)
                         zip.getInputStream(entry).use { installElf(it, destination) }
                     }
                 } finally {
@@ -95,16 +78,51 @@ internal object TurnipDriver {
         }
         if (id != "local") File(folder, "name.txt").writeText(name)
         select(context, id)
-        GameActivity.vulkanLog(context, id).delete()
     }
 
-    private fun installElf(input: InputStream, destination: AtomicFile) {
-        val header = ByteArray(20)
-        DataInputStream(input).readFully(header)
-        require(header.copyOfRange(0, 7).contentEquals(byteArrayOf(0x7f, 0x45, 0x4c, 0x46, 2, 1, 1)) &&
+    private fun findLibrary(zip: ZipFile): ZipEntry {
+        val files = zip.entries().asSequence().filterNot { it.isDirectory }.toList()
+        val metadata = files.firstOrNull { it.name == "meta.json" }
+            ?: files.singleOrNull { it.name.substringAfterLast('/') == "meta.json" }
+        val declared = metadata?.let {
+            require(it.size in 1..64 * 1024L) { "O meta.json do driver é inválido." }
+            zip.getInputStream(it).bufferedReader().use { reader ->
+                val meta = JSONObject(reader.readText())
+                require(meta.optInt("minApi", 0) <= android.os.Build.VERSION.SDK_INT) {
+                    "O driver exige uma versão mais recente do Android."
+                }
+                meta.optString("libraryName").trim().takeIf { name -> name.isNotEmpty() }
+            }
+        }
+        val candidates = files.filter { file ->
+            val name = file.name.substringAfterLast('/')
+            if (declared != null) name == declared.substringAfterLast('/')
+            else name.endsWith(".so") && (name.startsWith("libvulkan") || name.startsWith("vulkan."))
+        }.filter { it.size in 20..LIMIT && zip.getInputStream(it).use { stream ->
+            isArm64Elf(stream.readNBytes(20))
+        } }
+        if (declared != null) {
+            val relativePath = metadata?.name.orEmpty().substringBeforeLast('/', "") + "/" + declared
+            candidates.firstOrNull { it.name == relativePath.trimStart('/') || it.name == declared }?.let {
+                return it
+            }
+        }
+        return candidates.singleOrNull() ?: error(
+            if (candidates.isEmpty()) "O pacote não contém uma biblioteca Vulkan ARM64 compatível."
+            else "O pacote contém mais de uma biblioteca Vulkan ARM64 sem uma seleção clara."
+        )
+    }
+
+    private fun isArm64Elf(header: ByteArray): Boolean =
+        header.size == 20 &&
+            header.copyOfRange(0, 7).contentEquals(byteArrayOf(0x7f, 0x45, 0x4c, 0x46, 2, 1, 1)) &&
             header[16] == 3.toByte() && header[17] == 0.toByte() &&
-            header[18] == 0xb7.toByte() && header[19] == 0.toByte()) {
-            "Selecione um Turnip ARM64 para Android em formato ZIP ou .so."
+            header[18] == 0xb7.toByte() && header[19] == 0.toByte()
+
+    private fun installElf(input: InputStream, destination: AtomicFile) {
+        val header = input.readNBytes(20)
+        require(isArm64Elf(header)) {
+            "Selecione um Turnip ARM64 para Android em formato ZIP, ADPKG ou .so."
         }
         val output = destination.startWrite()
         try {
