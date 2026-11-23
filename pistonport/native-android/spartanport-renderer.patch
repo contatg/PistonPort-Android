@@ -1114,7 +1114,7 @@ index 5325169..85f2c87 100644
      u32 GetGraphicsQueueFamilyIndex() const {
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp
 new file mode 100644
-index 0000000..d3daca0
+index 0000000..5ce7cef
 --- /dev/null
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp
 @@ -0,0 +1,764 @@
@@ -1122,6 +1122,7 @@ index 0000000..d3daca0
 +// Adapted from ducvd89/Bloodborne-Android (1600cc0).
 +// bbport: see vk_lsfg.h.
 +#ifdef __ANDROID__
++#include "video_core/renderer_vulkan/vk_lsfg.h"
 +#include <android/hardware_buffer.h>
 +#include <dlfcn.h>
 +#include <sys/stat.h>
@@ -1137,7 +1138,6 @@ index 0000000..d3daca0
 +#include "common/logging/log.h"
 +#include "android_vulkan.h"
 +#include "video_core/renderer_vulkan/vk_instance.h"
-+#include "video_core/renderer_vulkan/vk_lsfg.h"
 +#include "video_core/renderer_vulkan/vk_scheduler.h"
 +
 +namespace Vulkan {
