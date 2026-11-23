@@ -254,11 +254,11 @@ jobs:
               assert {"AndroidManifest.xml", "classes.dex", "assets/image.json", "assets/cars3-runtime.elf"} <= files
               assert all(not name.startswith("assets/rootfs") for name in files)
           PYTHON
-          install -Dm644 "$apk" "$RUNNER_TEMP/piston-apk/PistonPort-Android-Turnip-arm64.apk"
+          install -Dm644 "$apk" "$RUNNER_TEMP/piston-apk/PistonPort-Android-Launcher-arm64.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: PistonPort-Android-Turnip-APK
-          path: ${{ runner.temp }}/piston-apk/PistonPort-Android-Turnip-arm64.apk
+          name: PistonPort-Android-Launcher-APK
+          path: ${{ runner.temp }}/piston-apk/PistonPort-Android-Launcher-arm64.apk
           if-no-files-found: error
           compression-level: 0

@@ -4,17 +4,12 @@ import android.content.Context
 import android.os.Bundle
 import android.os.Process
 import android.system.Os
-import android.view.Gravity
-import android.view.KeyEvent
-import android.view.MotionEvent
-import android.widget.Button
 import android.widget.FrameLayout
-import android.widget.LinearLayout
 import java.io.File
 import org.libsdl.app.SDLActivity
 
 class GameActivity : SDLActivity() {
-    private val pressed = mutableSetOf<Int>()
+    private var hud: RaceControls? = null
 
     override fun getLibraries() = arrayOf("SDL3", "pistonport")
 
@@ -34,7 +29,7 @@ class GameActivity : SDLActivity() {
         Os.setenv("PISTON_LOG_FILE", logFile(this).path, true)
         Os.setenv("SPARTAN_CONFIG", File(profile, "pistonport.ini").path, true)
         Os.setenv("SPARTAN_GPU_USER_DIR", profile.path, true)
-        Os.setenv("SPARTAN_FPS_LIMIT", "30", true)
+        Os.setenv("SPARTAN_FPS_LIMIT", intent.getIntExtra("fps", 30).toString(), true)
         Os.setenv("SPARTAN_FULLSCREEN", "1", true)
         if (intent.getBooleanExtra("turnip", false)) {
             Os.setenv("PISTON_TURNIP_DIR", TurnipDriver.directory(this).path + "/", true)
@@ -43,56 +38,22 @@ class GameActivity : SDLActivity() {
             Os.unsetenv("PISTON_TURNIP_DIR")
             Os.unsetenv("PISTON_DRIVER_HOOKS")
         }
-        Os.setenv("SPARTAN_ANISOTROPY", "0", true)
+        Os.setenv("SPARTAN_ANISOTROPY", intent.getIntExtra("filtering", 0).toString(), true)
         super.onCreate(state)
-        if (!mBrokenLibraries && intent.hasExtra("image")) {
-            controls(Gravity.BOTTOM or Gravity.START, listOf(
-                "◀" to KeyEvent.KEYCODE_A, "▶" to KeyEvent.KEYCODE_D,
-                "▲" to KeyEvent.KEYCODE_W, "▼" to KeyEvent.KEYCODE_S,
-            ))
-            controls(Gravity.BOTTOM or Gravity.END, listOf(
-                "Freio" to KeyEvent.KEYCODE_R, "Acelerar" to KeyEvent.KEYCODE_F,
-                "Turbo" to KeyEvent.KEYCODE_E,
-            ))
-            controls(Gravity.END or Gravity.CENTER_VERTICAL, listOf(
-                "Pular" to KeyEvent.KEYCODE_SPACE, "Derrapar" to KeyEvent.KEYCODE_SHIFT_LEFT,
-                "Item" to KeyEvent.KEYCODE_Q, "Pausa" to KeyEvent.KEYCODE_ENTER,
-            ))
+        if (!mBrokenLibraries && intent.hasExtra("image") && intent.getBooleanExtra("touch", true)) {
+            hud = RaceControls(this, intent.getIntExtra("control_size", 100),
+                intent.getIntExtra("control_opacity", 85), { key, down ->
+                    if (down) SDLActivity.onNativeKeyDown(key) else SDLActivity.onNativeKeyUp(key)
+                }).also { controls ->
+                addContentView(controls, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+                ))
+            }
         }
-    }
-
-    private fun controls(gravity: Int, keys: List<Pair<String, Int>>) {
-        val row = LinearLayout(this).apply { isMotionEventSplittingEnabled = true }
-        keys.forEach { (label, key) ->
-            row.addView(Button(this).apply {
-                text = label
-                alpha = 0.76f
-                minimumWidth = 0
-                minWidth = (48 * resources.displayMetrics.density).toInt()
-                setPadding(8, 0, 8, 0)
-                isFocusable = false
-                setOnClickListener {
-                    SDLActivity.onNativeKeyDown(key)
-                    postDelayed({ SDLActivity.onNativeKeyUp(key) }, 90)
-                }
-                setOnTouchListener { _, event ->
-                    when (event.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> if (pressed.add(key)) SDLActivity.onNativeKeyDown(key)
-                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                            if (pressed.remove(key)) SDLActivity.onNativeKeyUp(key)
-                    }
-                    true
-                }
-            })
-        }
-        addContentView(row, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, gravity
-        ))
     }
 
     override fun onPause() {
-        pressed.forEach { SDLActivity.onNativeKeyUp(it) }
-        pressed.clear()
+        hud?.release()
         super.onPause()
     }
 

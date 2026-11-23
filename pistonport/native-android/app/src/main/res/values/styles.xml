@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.PistonPort" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:colorAccent">#FF5164</item>
+        <item name="android:windowBackground">#100E11</item>
+        <item name="android:statusBarColor">#100E11</item>
+        <item name="android:navigationBarColor">#100E11</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
