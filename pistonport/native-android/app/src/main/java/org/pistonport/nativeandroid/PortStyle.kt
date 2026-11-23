@@ -60,6 +60,7 @@ internal class RaceBanner(context: Context) : View(context) {
         val w = width.toFloat()
         val h = height.toFloat()
         val shader = paint.shader
+        paint.alpha = 255
         canvas.drawRect(0f, 0f, w, h, paint)
         paint.shader = null
         paint.color = 0x24ffb0bd
