@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 // Compact FPS, frame time and upscaler readout follows Bloodborne-Android's FpsCounter.
-internal class PerformanceHud(context: Context, private val upscaler: String) : FrameLayout(context) {
+internal class PerformanceHud(context: Context, @Volatile var upscaler: String) : FrameLayout(context) {
     private val readout = PortStyle.text(context, "— FPS", 13f, bold = true)
     private val worker = Executors.newSingleThreadScheduledExecutor()
     private val sensors = AdrenoLoad()
@@ -50,7 +50,8 @@ internal class PerformanceHud(context: Context, private val upscaler: String) : 
                 if (real < total && elapsed > 0) {
                     append(String.format(Locale.getDefault(), "  (%.0f base + FG)", real * 1000.0 / elapsed))
                 }
-                if (upscaler.isNotEmpty()) append("  $upscaler")
+                val provider = upscaler
+                if (provider.isNotEmpty()) append("  $provider")
                 append(if (gpu == null) "\nGPU —" else "\nGPU $gpu%")
             }
             post {

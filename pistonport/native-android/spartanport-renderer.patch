@@ -1070,16 +1070,20 @@ index 0000000..bbb9310
 +
 +} // namespace Vulkan
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
-index 10565e9..2e52bf8 100644
+index 10565e9..c18563c 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
-@@ -20,2 +20,5 @@
+@@ -3,2 +3,3 @@
+
++#include <algorithm>
+ #include <cstdio>
+@@ -20,2 +21,5 @@
  #include "video_core/renderer_vulkan/vk_platform.h"
 +#ifdef __ANDROID__
 +#include "android_vulkan.h"
 +#endif
 
-@@ -183,2 +186,7 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
+@@ -183,2 +187,7 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
 
 +#ifdef __ANDROID__
 +    ASSERT_MSG(piston_android_vulkan_device(static_cast<VkInstance>(*instance),
@@ -1087,14 +1091,19 @@ index 10565e9..2e52bf8 100644
 +               "The active Android GPU driver does not meet the Vulkan requirements");
 +#endif
      available_extensions = GetSupportedExtensions(physical_device);
-@@ -312,2 +320,10 @@ bool Instance::CreateDevice() {
+@@ -312,2 +321,15 @@ bool Instance::CreateDevice() {
      // Required
 +#ifdef __ANDROID__
-+    if (const char* mode = std::getenv("PISTON_FRAMEGEN"); mode && std::atoi(mode) >= 2) {
-+        const bool hardware_buffer = add_extension(VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME);
-+        const bool foreign_queue = add_extension(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
-+        const bool semaphore_fd = add_extension(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
-+        bloodframe_extensions = hardware_buffer && foreign_queue && semaphore_fd;
++    const std::array bloodframe_required{
++        VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
++        VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
++        VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
++    };
++    bloodframe_extensions = std::ranges::all_of(bloodframe_required, [&](const char* extension) {
++        return std::find(available_extensions.begin(), available_extensions.end(), extension) != available_extensions.end();
++    });
++    if (bloodframe_extensions) {
++        for (const char* extension : bloodframe_required) add_extension(extension);
 +    }
 +#endif
      ASSERT_MSG(add_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME),
@@ -1114,10 +1123,10 @@ index 5325169..85f2c87 100644
      u32 GetGraphicsQueueFamilyIndex() const {
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp
 new file mode 100644
-index 0000000..5ce7cef
+index 0000000..8721fa7
 --- /dev/null
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp
-@@ -0,0 +1,764 @@
+@@ -0,0 +1,771 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +// Adapted from ducvd89/Bloodborne-Android (1600cc0).
 +// bbport: see vk_lsfg.h.
@@ -1238,6 +1247,7 @@ index 0000000..5ce7cef
 +        api->wait(context->id, WaitNs);
 +    }
 +    if (device) {
++        std::scoped_lock lock{Scheduler::submit_mutex};
 +        static_cast<void>(device.waitIdle());
 +    }
 +    if (context) {
@@ -1274,7 +1284,10 @@ index 0000000..5ce7cef
 +        std::fflush(stdout);
 +    }
 +    failed = true;
-+    static_cast<void>(instance.GetDevice().waitIdle());
++    {
++        std::scoped_lock lock{Scheduler::submit_mutex};
++        static_cast<void>(instance.GetDevice().waitIdle());
++    }
 +    if (context) {
 +        DestroyContext(*context);
 +        context.reset();
@@ -1572,7 +1585,10 @@ index 0000000..5ce7cef
 +    }
 +    const auto start = std::chrono::steady_clock::now();
 +    // The game device may still read the old buffers.
-+    static_cast<void>(instance.GetDevice().waitIdle());
++    {
++        std::scoped_lock lock{Scheduler::submit_mutex};
++        static_cast<void>(instance.GetDevice().waitIdle());
++    }
 +    auto next = std::make_unique<Context>();
 +    next->width = width;
 +    next->height = height;
@@ -2077,17 +2093,19 @@ index 472be23..48d7718 100644
 +#endif
 
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
-index 4f29b10..d46868c 100644
+index 4f29b10..6017584 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
-@@ -50,2 +50,6 @@
+@@ -50,2 +50,8 @@
 
 +#ifdef __ANDROID__
 +extern "C" void piston_frame_presented(bool real);
++extern "C" int piston_live_graphics(void);
++extern "C" void piston_report_bloodframe(int status);
 +#endif
 +
  namespace Vulkan {
-@@ -108,2 +112,13 @@ static vk::Rect2D FitImage(s32 frame_width, s32 frame_height, s32 swapchain_widt
+@@ -108,2 +114,13 @@ static vk::Rect2D FitImage(s32 frame_width, s32 frame_height, s32 swapchain_widt
      float frame_aspect = static_cast<float>(frame_width) / frame_height;
 +#ifdef __ANDROID__
 +    static const float override_aspect = [] {
@@ -2101,25 +2119,35 @@ index 4f29b10..d46868c 100644
 +    }
 +#endif
      float swapchain_aspect = static_cast<float>(swapchain_width) / swapchain_height;
-@@ -308,2 +323,5 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
+@@ -308,2 +325,5 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
      const u32 num_images = swapchain.GetImageCount();
 +#ifdef __ANDROID__
 +    SetExpectedGameSize(swapchain.GetWidth(), swapchain.GetHeight());
 +#endif
      const vk::Device device = instance.GetDevice();
-@@ -880,2 +898,109 @@ void Presenter::PresentLoadingFrame() {
+@@ -880,2 +900,121 @@ void Presenter::PresentLoadingFrame() {
 
 +#ifdef __ANDROID__
 +void Presenter::PresentBloodframe(Frame* frame) {
-+    if (!bloodframe_initialized) {
-+        bloodframe_initialized = true;
-+        const auto settings = BbLsfgState::Initial();
-+        if (settings.On()) {
-+            if (instance.SupportsBloodframe()) {
-+                bloodframe = Lsfg::Create(instance, settings);
-+            } else {
-+                LOG_WARNING(Render_Vulkan, "Bloodframe: driver lacks AHardwareBuffer or sync-fd support");
-+            }
++    static const auto initial = BbLsfgState::Initial();
++    const int live = piston_live_graphics();
++    const int mode = live >= 0 ? live & 7 : static_cast<int>(initial.multiplier);
++    const bool mako = live >= 0 ? (live & 64) != 0 : initial.model == BbLsfgState::Model::Mako;
++    const int request = mode >= 2 ? mode | (mako ? 64 : 0) : 0;
++    if (request != bloodframe_request) {
++        bloodframe_request = request;
++        bloodframe.reset();
++        if (request == 0) {
++            piston_report_bloodframe(0);
++        } else if (!instance.SupportsBloodframe()) {
++            piston_report_bloodframe(-2);
++            LOG_WARNING(Render_Vulkan, "Bloodframe: driver lacks AHardwareBuffer or sync-fd support");
++        } else {
++            auto settings = initial;
++            settings.multiplier = static_cast<unsigned>(mode);
++            settings.model = mako ? BbLsfgState::Model::Mako : BbLsfgState::Model::Lsfg;
++            bloodframe = Lsfg::Create(instance, settings);
++            piston_report_bloodframe(bloodframe ? 1 : -1);
 +        }
 +    }
 +    if (!bloodframe) {
@@ -2128,6 +2156,7 @@ index 4f29b10..d46868c 100644
 +    const int generated = bloodframe->ProcessFrame(present_scheduler, frame->image,
 +        frame->width, frame->height, frame->ready_semaphore, frame->ready_tick);
 +    if (generated < 0) {
++        piston_report_bloodframe(-1);
 +        bloodframe.reset();
 +        return;
 +    }
@@ -2139,6 +2168,7 @@ index 4f29b10..d46868c 100644
 +        if (!PresentGeneratedImage(bloodframe->GetOutput(i), frame->width, frame->height, i)) {
 +            return;
 +        }
++        piston_report_bloodframe(2);
 +        if (bloodframe->Paced()) {
 +            std::this_thread::sleep_until(start + spacing * (i + 1));
 +        }
@@ -2217,15 +2247,21 @@ index 4f29b10..d46868c 100644
 +#endif
 +
  void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame) {
-@@ -928,2 +1053,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+@@ -896,3 +1035,4 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+     // spartanport: frame generation: the generated frame first, the real one halfway to the next.
+-    if (Frame* generated = std::exchange(frame->generated, nullptr)) {
++    Frame* generated = std::exchange(frame->generated, nullptr);
++    if (generated) {
+         Present(generated, false, false);
+@@ -928,2 +1068,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
 +#ifdef __ANDROID__
-+    if (is_game_frame && !is_reusing_frame && !frame->is_hdr) {
++    if (!generated && is_game_frame && !is_reusing_frame && !frame->is_hdr) {
 +        PresentBloodframe(frame);
 +    }
 +#endif
      const auto acquire_start = profile ? Clock::now() : Clock::time_point{};
-@@ -998,14 +1128,18 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+@@ -998,14 +1143,18 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                                 {}, {}, pre_barriers);
 -        const vk::ClearColorValue black{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
 -        cmdbuf.clearColorImage(swapchain_image, vk::ImageLayout::eTransferDstOptimal, black, color_range);
@@ -2255,7 +2291,7 @@ index 4f29b10..d46868c 100644
 -                         vk::Filter::eLinear);
 +                         vk::ImageLayout::eTransferDstOptimal, region, vk::Filter::eLinear);
          if (VideoCore::ConsumeGameOnlyScreenshotRequests() != 0) {
-@@ -1100,3 +1234,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+@@ -1100,3 +1249,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
          std::scoped_lock submit_lock{Scheduler::submit_mutex};
 -        if (!swapchain.Present() && !window.IsMinimized() && window.GetWidth() > 0 &&
 +        const bool presented = swapchain.Present();
@@ -2266,7 +2302,7 @@ index 4f29b10..d46868c 100644
 +#endif
 +        if (!presented && !window.IsMinimized() && window.GetWidth() > 0 &&
              window.GetHeight() > 0) {
-@@ -1211,2 +1351,14 @@ void Presenter::SetExpectedGameSize(s32 width, s32 height) {
+@@ -1211,2 +1366,14 @@ void Presenter::SetExpectedGameSize(s32 width, s32 height) {
      }
 +#ifdef __ANDROID__
 +    // Keep the intermediate post-process buffer at the game's size in light mode.
@@ -2282,7 +2318,7 @@ index 4f29b10..d46868c 100644
 +#endif
      const float ratio = (float)width / (float)height;
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h
-index 212581e..67cca63 100644
+index 212581e..36783c6 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h
 @@ -14,2 +14,5 @@
@@ -2297,7 +2333,7 @@ index 212581e..67cca63 100644
 +    void PresentBloodframe(Frame* frame);
 +    bool PresentGeneratedImage(const Lsfg::Output& output, u32 width, u32 height, u32 index);
 +    std::unique_ptr<Lsfg> bloodframe;
-+    bool bloodframe_initialized = false;
++    int bloodframe_request = -1;
 +#endif
      Scheduler flip_scheduler;
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp
@@ -2327,7 +2363,7 @@ index 6e2a115..8b3b422 100644
 +#endif
      if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR ||
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
-index a11e28c..100c7a4 100644
+index a11e28c..ca4e1fb 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
 @@ -235,3 +235,3 @@ bool TemporalUpscaler::Active() const {
@@ -2340,12 +2376,34 @@ index a11e28c..100c7a4 100644
 -    return !SpartanToggle::Disabled(1u << 27) && !UseFsr4() &&
 +    return !SpartanToggle::Disabled(1u << 27) && !UseFsr4() && !UseGsr2() &&
             SpartanSettings::Get().upscaler != SpartanSettings::UpscalerTaa;
-@@ -521,3 +521,3 @@ void TemporalUpscaler::RunLdr() {
+@@ -269,2 +269,6 @@ bool TemporalUpscaler::RasterScaling() const {
+
++#ifdef __ANDROID__
++extern "C" int piston_live_graphics(void);
++#endif
++
+ bool TemporalUpscaler::OnFrameStart() {
+@@ -294,2 +298,14 @@ bool TemporalUpscaler::OnFrameStart() {
+     }
++#ifdef __ANDROID__
++    const int live = piston_live_graphics();
++    if (live >= 0 && live != android_graphics_request) {
++        constexpr int providers[]{SpartanSettings::UpscalerOff, SpartanSettings::UpscalerFsr3,
++                                  SpartanSettings::UpscalerTaa, SpartanSettings::UpscalerGsr2};
++        auto& settings = SpartanSettings::Get();
++        const int old = settings.upscaler.exchange(providers[(live >> 3) & 3]);
++        if (old != settings.upscaler.load()) failed = false;
++        settings.frame_generation = (live & 7) == 1 ? 1 : 0;
++        android_graphics_request = live;
++    }
++#endif
+     const auto& settings = SpartanSettings::Get();
+@@ -521,3 +537,3 @@ void TemporalUpscaler::RunLdr() {
      const bool stencil_mask =
 -        !UseFsr4() && (RecordStencilReactive(cmdbuf, depth, depth_format, w, h) ||
 +        !UseFsr4() && !UseGsr2() && (RecordStencilReactive(cmdbuf, depth, depth_format, w, h) ||
                         (mask_ready && ReactiveOn()));
-@@ -536,3 +536,6 @@ void TemporalUpscaler::RunLdr() {
+@@ -536,3 +552,6 @@ void TemporalUpscaler::RunLdr() {
      }
 -    if (UseFsr4()) {
 +    if (UseGsr2()) {
@@ -2353,54 +2411,54 @@ index a11e28c..100c7a4 100644
 +        if (!RecordGsr2(cmdbuf, color_view, depth_view, w, h, w, h)) return;
 +    } else if (UseFsr4()) {
          if (!RecordFsr4(cmdbuf, {color.GetImage(), {}, w, h}, {depth.GetImage(), depth_view, w, h},
-@@ -648,2 +651,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
+@@ -648,2 +667,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
      const bool use_fsr4 = UseFsr4();
 +    const bool use_gsr2 = UseGsr2();
      const bool use_taa = SpartanSettings::Get().upscaler == SpartanSettings::UpscalerTaa;
-@@ -654,3 +658,4 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
+@@ -654,3 +674,4 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
      if (resources_ready && w == width && h == height && ow == out_width && oh == out_height &&
 -        hdr == context_hdr && use_fsr4 == resources_fsr4 && use_taa == resources_taa) {
 +        hdr == context_hdr && use_fsr4 == resources_fsr4 && use_taa == resources_taa &&
 +        use_gsr2 == resources_gsr2) {
          return true;
-@@ -661,2 +666,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
+@@ -661,2 +682,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
      resources_ready = false;
 +    if (!use_gsr2) gsr2.reset();
      if (context) {
-@@ -693,3 +699,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
+@@ -693,3 +715,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
      // FSR 4 has its own model context (vk_fsr4); the images below are shared.
 -    if (!use_fsr4 && !use_taa) {
 +    if (!use_fsr4 && !use_taa && !use_gsr2) {
          if (const u64 issues = ffxVkPortableValidateUpscaleCreateInfo(&create_info)) {
-@@ -794,2 +800,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
+@@ -794,2 +816,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
      resources_fsr4 = use_fsr4;
 +    resources_gsr2 = use_gsr2;
      resources_taa = use_taa;
-@@ -804,2 +811,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
+@@ -804,2 +827,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
      }
 +    if (use_gsr2) return true;
      FfxVkPortableMemoryUsage usage{};
-@@ -1032,3 +1040,3 @@ void TemporalUpscaler::ExtraSharpen(vk::CommandBuffer cmdbuf, vk::Image target,
+@@ -1032,3 +1056,3 @@ void TemporalUpscaler::ExtraSharpen(vk::CommandBuffer cmdbuf, vk::Image target,
      const auto& settings = SpartanSettings::Get();
 -    const float extra = std::clamp(settings.sharpness.load(), 0.0f, 2.0f) - 1.0f;
 +    const float extra = std::clamp(settings.sharpness.load(), 0.0f, 2.0f) - (UseGsr2() ? 0.0f : 1.0f);
      if (!settings.sharpen || extra <= 0.0f) {
-@@ -1391,2 +1399,4 @@ void TemporalUpscaler::Run() {
+@@ -1391,2 +1415,4 @@ void TemporalUpscaler::Run() {
          dispatched = true;
 +    } else if (UseGsr2()) {
 +        dispatched = RecordGsr2(cmdbuf, input_color_view, input_depth_view, w, h, ow, oh);
      } else if (UseFsr4()) {
-@@ -1958,3 +1968,3 @@ void TemporalUpscaler::RunScaled() {
+@@ -1958,3 +1984,3 @@ void TemporalUpscaler::RunScaled() {
      // spartanport: FSR 4 writes its HDR-format output, copied into the output-size UI image.
 -    if (UseFsr4() || SpartanSettings::Get().upscaler == SpartanSettings::UpscalerTaa) {
 +    if (UseFsr4() || UseGsr2() || SpartanSettings::Get().upscaler == SpartanSettings::UpscalerTaa) {
          const auto [fw, fh] = std::array{ow, oh};
-@@ -1966,2 +1976,4 @@ void TemporalUpscaler::RunScaled() {
+@@ -1966,2 +1992,4 @@ void TemporalUpscaler::RunScaled() {
              RecordTaa(cmdbuf, color_view, depth_view);
 +        } else if (UseGsr2()) {
 +            ok4 = RecordGsr2(cmdbuf, color_view, depth_view, w, h, ow, oh);
          } else {
-@@ -2353,2 +2365,33 @@ namespace Vulkan {
+@@ -2353,2 +2381,33 @@ namespace Vulkan {
 
 +bool TemporalUpscaler::UseGsr2() const {
 +    return SpartanSettings::Get().upscaler == SpartanSettings::UpscalerGsr2;
@@ -2435,7 +2493,7 @@ index a11e28c..100c7a4 100644
 +
  bool TemporalUpscaler::UseFsr4() const {
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h
-index 495d892..6595165 100644
+index 495d892..c659a47 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h
 @@ -25,2 +25,3 @@
@@ -2448,9 +2506,12 @@ index 495d892..6595165 100644
 +    bool RecordGsr2(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth,
 +                    u32 w, u32 h, u32 ow, u32 oh);
      bool RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image color, Fsr4Upscaler::Image depth,
-@@ -279,2 +283,4 @@ private:
+@@ -279,2 +283,7 @@ private:
      std::unique_ptr<Fsr4Upscaler> fsr4;
 +    std::unique_ptr<GsrUpscaler> gsr2;
++#ifdef __ANDROID__
++    int android_graphics_request = -1;
++#endif
 +    bool resources_gsr2 = false;
      std::unique_ptr<FrameGeneration> frame_generation;
 diff --git a/gpu/shadps4/video_core/texture_cache/sampler.cpp b/gpu/shadps4/video_core/texture_cache/sampler.cpp
@@ -2475,10 +2536,10 @@ index 968de34..ac79aa3 100644
      const float requested = std::max(game_anisotropy ? sampler.MaxAniso() : 1.0f,
 diff --git a/gpu/shim/android_vulkan.h b/gpu/shim/android_vulkan.h
 new file mode 100644
-index 0000000..1b69ef2
+index 0000000..7318077
 --- /dev/null
 +++ b/gpu/shim/android_vulkan.h
-@@ -0,0 +1,16 @@
+@@ -0,0 +1,18 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +#pragma once
 +
@@ -2491,6 +2552,8 @@ index 0000000..1b69ef2
 +PFN_vkGetInstanceProcAddr piston_android_vulkan_loader(void);
 +int piston_android_vulkan_device(VkInstance instance, VkPhysicalDevice device);
 +int piston_android_vulkan_test(void);
++int piston_live_graphics(void);
++void piston_report_bloodframe(int status);
 +
 +#ifdef __cplusplus
 +}
@@ -2733,10 +2796,10 @@ index a40c4f2..ea5e1b6 100644
  #endif
 diff --git a/src/android_vulkan.c b/src/android_vulkan.c
 new file mode 100644
-index 0000000..3287dea
+index 0000000..0fecd16
 --- /dev/null
 +++ b/src/android_vulkan.c
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,193 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +#include "gpu/shim/android_vulkan.h"
 +
@@ -2767,6 +2830,36 @@ index 0000000..3287dea
 +    (void)env;
 +    (void)hud;
 +    return atomic_load_explicit(&presented_frames, memory_order_relaxed);
++}
++
++// A single snapshot keeps the framegen method, upscaler and model in sync.
++static atomic_int live_graphics = -1;
++static atomic_int bloodframe_status;
++
++int piston_live_graphics(void) {
++    return atomic_load_explicit(&live_graphics, memory_order_relaxed);
++}
++
++void piston_report_bloodframe(int status) {
++    atomic_store_explicit(&bloodframe_status, status, memory_order_relaxed);
++}
++
++JNIEXPORT void JNICALL
++Java_org_pistonport_nativeandroid_GameActivity_setLiveGraphics(JNIEnv *env, jobject activity,
++    jint framegen, jint upscaler, jint model) {
++    (void)env;
++    (void)activity;
++    if (framegen < 0 || framegen > 4 || upscaler < 0 || upscaler > 3 || model < 0 || model > 1)
++        return;
++    atomic_store_explicit(&live_graphics, framegen | (upscaler << 3) | (model << 6),
++                          memory_order_relaxed);
++}
++
++JNIEXPORT jint JNICALL
++Java_org_pistonport_nativeandroid_GameActivity_bloodframeStatus(JNIEnv *env, jobject activity) {
++    (void)env;
++    (void)activity;
++    return atomic_load_explicit(&bloodframe_status, memory_order_relaxed);
 +}
 +
 +static void init_loader(void) {

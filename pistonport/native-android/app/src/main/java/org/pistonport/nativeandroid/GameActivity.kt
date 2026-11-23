@@ -5,6 +5,8 @@ import android.os.Bundle
 import android.os.Process
 import android.system.Os
 import android.view.Gravity
+import android.view.View
+import android.widget.Button
 import android.widget.FrameLayout
 import java.io.File
 import org.libsdl.app.SDLActivity
@@ -12,6 +14,9 @@ import org.libsdl.app.SDLActivity
 class GameActivity : SDLActivity() {
     private var hud: TouchControllerOverlay? = null
     private var performance: PerformanceHud? = null
+    private var racePanel: RaceSettingsPanel? = null
+    private var resumed = false
+    private lateinit var raceSettings: RaceSettingsPanel.State
 
     override fun getLibraries() = arrayOf("SDL3", "pistonport")
 
@@ -40,27 +45,94 @@ class GameActivity : SDLActivity() {
         Os.setenv("SPARTAN_ANISOTROPY", intent.getIntExtra("filtering", 0).toString(), true)
         configureGraphics(profile)
         super.onCreate(state)
-        if (!mBrokenLibraries && intent.getBooleanExtra("touch", true)) {
-            hud = TouchControllerOverlay(this) { buttons, lx, ly, rx, ry, left, right, l2, r2 ->
-                val mask = buttons.fold(0) { bits, button -> bits or (touchButtons[button] ?: 0) }
-                updateTouch(mask, lx, ly, rx, ry, left, right, l2, r2)
-            }.also { controls ->
-                controls.alpha = intent.getIntExtra("control_opacity", 85).coerceIn(55, 100) / 100f
-                addContentView(controls, FrameLayout.LayoutParams(-1, -1))
+        if (mBrokenLibraries) return
+        raceSettings = RaceSettingsPanel.State(
+            state?.getInt("race_framegen") ?: intent.getIntExtra("framegen", 0),
+            state?.getInt("race_upscaler") ?: intent.getIntExtra("upscaler", 0),
+            state?.getInt("race_model") ?: intent.getIntExtra("fg_model", 0),
+            state?.getBoolean("race_fps") ?: intent.getBooleanExtra("performance_hud", true),
+            state?.getBoolean("race_touch") ?: intent.getBooleanExtra("touch", true))
+        hud = TouchControllerOverlay(this) { buttons, lx, ly, rx, ry, left, right, l2, r2 ->
+            val mask = buttons.fold(0) { bits, button -> bits or (touchButtons[button] ?: 0) }
+            updateTouch(mask, lx, ly, rx, ry, left, right, l2, r2)
+        }.also { controls ->
+            controls.alpha = intent.getIntExtra("control_opacity", 85).coerceIn(55, 100) / 100f
+            addContentView(controls, FrameLayout.LayoutParams(-1, -1))
+        }
+        performance = PerformanceHud(this, "").also {
+            addContentView(it, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.RIGHT)
+                .apply { topMargin = dp(12); marginEnd = dp(12) })
+        }
+        val hasMako = FrameGenAssets.makoInstalled(profile)
+        val hasLossless = FrameGenAssets.lossless(profile).isFile
+        val panel = RaceSettingsPanel(this, raceSettings, hasMako, hasLossless,
+            onGraphics = ::applyRaceGraphics, onOverlay = { updateRaceOverlays() },
+            nativeStatus = ::bloodframeStatus)
+        racePanel = panel
+        val open = Button(this).apply {
+            text = "⚙"
+            contentDescription = "Ajustes de corrida"
+            textSize = 19f
+            setPadding(0, 0, 0, 0)
+            setTextColor(PortStyle.text)
+            stateListAnimator = null
+            background = PortStyle.action(this@GameActivity, PortStyle.raised, 12, PortStyle.border)
+            setOnClickListener {
+                hud?.release()
+                panel.visibility = View.VISIBLE
             }
         }
-        if (!mBrokenLibraries && intent.getBooleanExtra("performance_hud", true)) {
-            performance = PerformanceHud(this, when (intent.getIntExtra("upscaler", 0)) {
-                1 -> "FSR 3.1"
-                2 -> "TAA"
-                3 -> "GSR 2"
-                else -> ""
-            }).also {
-                addContentView(it, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.RIGHT)
-                    .apply { topMargin = dp(12); marginEnd = dp(12) })
-            }
+        addContentView(open, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
+            .apply { bottomMargin = dp(12) })
+        addContentView(panel, FrameLayout.LayoutParams(-1, -1))
+        updateRaceOverlays()
+        applyRaceGraphics(raceSettings)
+    }
+
+    private fun applyRaceGraphics(state: RaceSettingsPanel.State) {
+        val available = when (state.framegen) {
+            0 -> true
+            1 -> state.upscaler == 1
+            else -> racePanel?.modelReady(state.model) == true
+        }
+        setLiveGraphics(if (available) state.framegen else 0, state.upscaler, state.model)
+        performance?.upscaler = when (state.upscaler) {
+            1 -> "FSR 3.1"
+            2 -> "TAA"
+            3 -> "GSR 2"
+            else -> ""
         }
     }
+
+    private fun updateRaceOverlays() {
+        hud?.visibility = if (raceSettings.touch) View.VISIBLE else View.GONE
+        if (!raceSettings.touch) hud?.release()
+        performance?.visibility = if (raceSettings.fps) View.VISIBLE else View.GONE
+        if (raceSettings.fps && resumed) performance?.start() else performance?.stop()
+    }
+
+    override fun onSaveInstanceState(state: Bundle) {
+        if (::raceSettings.isInitialized) {
+            state.putInt("race_framegen", raceSettings.framegen)
+            state.putInt("race_upscaler", raceSettings.upscaler)
+            state.putInt("race_model", raceSettings.model)
+            state.putBoolean("race_fps", raceSettings.fps)
+            state.putBoolean("race_touch", raceSettings.touch)
+        }
+        super.onSaveInstanceState(state)
+    }
+
+    @Deprecated("The game uses the Android back button to close the overlay.")
+    override fun onBackPressed() {
+        if (racePanel?.visibility == View.VISIBLE) {
+            racePanel?.visibility = View.GONE
+        } else {
+            super.onBackPressed()
+        }
+    }
+
+    private external fun setLiveGraphics(framegen: Int, upscaler: Int, model: Int)
+    private external fun bloodframeStatus(): Int
 
     private fun configureGraphics(profile: File) {
         fun number(key: String, default: Int) = intent.getIntExtra(key, default)
@@ -111,10 +183,12 @@ class GameActivity : SDLActivity() {
 
     override fun onResume() {
         super.onResume()
-        performance?.start()
+        resumed = true
+        if (::raceSettings.isInitialized) updateRaceOverlays()
     }
 
     override fun onPause() {
+        resumed = false
         performance?.stop()
         hud?.release()
         super.onPause()

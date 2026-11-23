@@ -165,14 +165,14 @@ class HomeActivity : Activity() {
     private fun buildGraphics(): LinearLayout = column().apply {
         val rendering = card("Imagem e desempenho")
         append(rendering, Switch(this@HomeActivity).apply {
-            text = "Modo leve"
+            text = "Modo Batata"
             setTextColor(PortStyle.text)
             minHeight = dp(48)
             isChecked = settings.liteMode
             setOnCheckedChangeListener { _, checked -> settings.liteMode = checked }
         })
         append(rendering, PortStyle.text(this@HomeActivity,
-            "Ativo no Snapdragon 685 por padrão. Usa 360p e limita a 30 FPS, com efeitos e framegen desligados. Desative para usar seus ajustes manuais.",
+            "Ativo no Snapdragon 685 por padrão. Usa 360p e limita a 30 FPS, com efeitos e framegen desligados ao iniciar. Desative para usar seus ajustes manuais.",
             13f, PortStyle.muted))
         menuChoice(rendering, "Resolução interna", listOf(
             360 to "360p", 480 to "480p", 540 to "540p", 720 to "720p",
