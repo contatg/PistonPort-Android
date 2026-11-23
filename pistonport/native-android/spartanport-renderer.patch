@@ -94,15 +94,15 @@ index 7f4f512..48e403b 100644
 +#if defined(__linux__) && !defined(__ANDROID__)
      if (std::getenv("SPARTAN_UFFD") && std::getenv("SPARTAN_UFFD")[0] == '1') {
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
-index 10565e9..3877bdb 100644
+index 10565e9..a5e0687 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
-@@ -9,2 +9,5 @@
-
+@@ -20,2 +20,5 @@
+ #include "video_core/renderer_vulkan/vk_platform.h"
 +#ifdef __ANDROID__
 +#include "android_vulkan.h"
 +#endif
- #include "common/assert.h"
+
 @@ -183,2 +186,7 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
 
 +#ifdef __ANDROID__
@@ -112,7 +112,7 @@ index 10565e9..3877bdb 100644
 +#endif
      available_extensions = GetSupportedExtensions(physical_device);
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp
-index 472be23..a78e076 100644
+index 472be23..48d7718 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp
 @@ -4,4 +4,4 @@
@@ -122,12 +122,12 @@ index 472be23..a78e076 100644
 +#if defined(__ANDROID__)
 +// The build enables VK_USE_PLATFORM_ANDROID_KHR across the renderer.
  #elif defined(_WIN64)
-@@ -18,2 +18,5 @@
-
+@@ -24,2 +24,5 @@
+ #include "video_core/renderer_vulkan/vk_platform.h"
 +#ifdef __ANDROID__
 +#include "android_vulkan.h"
 +#endif
- #include "common/assert.h"
+
 @@ -65,3 +68,12 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
 
 -#if defined(VK_USE_PLATFORM_WIN32_KHR)
