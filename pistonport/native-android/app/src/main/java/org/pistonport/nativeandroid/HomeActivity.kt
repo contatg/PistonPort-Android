@@ -171,7 +171,7 @@ class HomeActivity : Activity() {
         graphicsChoice(rendering, "Proporção da imagem", "aspect", 0,
             aspectRatios.mapIndexed { index, aspect -> index to if (index == 0) "Automática" else aspect })
         graphicsChoice(rendering, "Upscaler", "upscaler", 0,
-            listOf(0 to "Desligado", 1 to "FSR 3.1", 2 to "TAA"))
+            listOf(0 to "Desligado", 1 to "FSR 3.1", 2 to "TAA", 3 to "GSR 2"))
         graphicsChoice(rendering, "Qualidade do upscaler", "preset", 3, listOf(
             0 to "Nativa", 5 to "Ultra qualidade", 1 to "Qualidade",
             2 to "Equilibrado", 3 to "Desempenho", 4 to "Ultra desempenho"))

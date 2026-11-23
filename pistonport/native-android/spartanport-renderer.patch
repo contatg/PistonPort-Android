@@ -1,5 +1,5 @@
 diff --git a/gpu/CMakeLists.txt b/gpu/CMakeLists.txt
-index e933214..2484e60 100644
+index e933214..29d6a8e 100644
 --- a/gpu/CMakeLists.txt
 +++ b/gpu/CMakeLists.txt
 @@ -59,2 +59,5 @@ endif()
@@ -13,17 +13,22 @@ index e933214..2484e60 100644
 -if (NOT WIN32)
 +if (NOT WIN32 AND NOT ANDROID)
      pkg_check_modules(X11 REQUIRED IMPORTED_TARGET x11)
-@@ -167,3 +170,3 @@ file(GLOB SHIM_SOURCES CONFIGURE_DEPENDS shim/*.cpp shim/*/*.cpp)
+@@ -139,2 +142,4 @@ add_host_shader(fg_hud.comp fg_hud_comp)
+ add_host_shader(taa.comp taa_comp)
++add_host_shader(gsr2_convert.comp gsr2_convert_comp)
++add_host_shader(gsr2_upscale.comp gsr2_upscale_comp)
+ add_host_shader(taa_sharpen.comp taa_sharpen_comp)
+@@ -167,3 +172,3 @@ file(GLOB SHIM_SOURCES CONFIGURE_DEPENDS shim/*.cpp shim/*/*.cpp)
  # library is static there and linked into the executable.
 -if (WIN32)
 +if (WIN32 OR ANDROID)
      set(SPARTANGPU_KIND STATIC)
-@@ -209,3 +212,3 @@ if (WIN32)
+@@ -209,3 +214,3 @@ if (WIN32)
      target_link_libraries(spartanportgpu PUBLIC Vulkan::Vulkan ws2_32 bcrypt ntdll synchronization winmm pdh)
 -else()
 +elseif (NOT ANDROID)
      target_link_libraries(spartanportgpu PUBLIC PkgConfig::X11)
-@@ -213,2 +216,19 @@ endif()
+@@ -213,2 +218,19 @@ endif()
 
 +if (ANDROID)
 +    add_subdirectory("${PISTON_ADRENOTOOLS}" adrenotools EXCLUDE_FROM_ALL)
@@ -62,6 +67,483 @@ index 5d723a2..26c0aa2 100644
  #endif
 +#include "common/spin_lock.h"
  #include "common/debug.h"
+diff --git a/gpu/shadps4/video_core/host_shaders/gsr2_convert.comp b/gpu/shadps4/video_core/host_shaders/gsr2_convert.comp
+new file mode 100644
+index 0000000..b335e5b
+--- /dev/null
++++ b/gpu/shadps4/video_core/host_shaders/gsr2_convert.comp
+@@ -0,0 +1,107 @@
++#version 450
++
++//============================================================================================================
++//
++//
++//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
++//                              SPDX-License-Identifier: BSD-3-Clause
++//
++//============================================================================================================
++
++// bbport: derived from Snapdragon GSR 2, glsl_2_pass_cs/sgsr2_convert.comp (upstream commit
++// d926f074, gpu/third_party/snapdragon-gsr2). Changes:
++//  - Vulkan binding numbers that do not overlap, parameters as push constants (no UBO);
++//  - the motion comes from the port's motion image (render pixels, previous - current: camera and
++//    objects together) converted to GSR's clip-space units, current - previous, +y down. The
++//    static clipToPrevClip reconstruction and the velocity decode are gone;
++//  - the depth gathers are scaled by the depth texture's own size and clamped to the scene's
++//    render size (the game's targets can be a few pixels larger than the scene);
++//  - bounds check for the dispatch's edge groups.
++
++layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
++
++layout(binding = 0) uniform sampler2D InputColor;
++layout(binding = 1) uniform sampler2D InputDepth;
++layout(binding = 2) uniform sampler2D InputMotion;
++layout(binding = 3, rgba16f) uniform writeonly image2D MotionDepthClipAlphaBuffer;
++layout(binding = 4, r32ui) uniform writeonly uimage2D YCoCgColor;
++
++layout(push_constant) uniform Params
++{
++    uvec2 renderSize;
++    uvec2 displaySize;
++    vec2  renderSizeRcp;
++    vec2  displaySizeRcp;
++    vec2  jitterOffset;
++    float preExposure;
++    float cameraFovAngleHor;
++    float minLerpContribution;
++    uint  bSameCamera;
++    uint  reset;
++} params;
++
++void main()
++{
++    ivec2 InputPos = ivec2(gl_GlobalInvocationID.xy);
++    if (any(greaterThanEqual(uvec2(InputPos), params.renderSize))) return;
++    float Exposure_co_rcp = params.preExposure;
++
++    // textureGather at a texel corner: the quad of texels (pos-1 .. pos). The depth texture can
++    // be larger than the scene: its own texel size, corners clamped to the scene's edge.
++    vec2 depthRcp = 1.0 / vec2(textureSize(InputDepth, 0));
++    vec2 sceneSize = vec2(params.renderSize);
++    vec2 corner = vec2(InputPos);
++    vec4 topleft = textureGather(InputDepth, corner * depthRcp, 0);
++    vec4 topRight = textureGather(InputDepth, min(corner + vec2(2.0, 0.0), sceneSize) * depthRcp, 0);
++    vec4 bottomLeft = textureGather(InputDepth, min(corner + vec2(0.0, 2.0), sceneSize) * depthRcp, 0);
++    vec4 bottomRight = textureGather(InputDepth, min(corner + vec2(2.0, 2.0), sceneSize) * depthRcp, 0);
++    float maxC = min(min(min(topleft.y,topRight.x),bottomLeft.z),bottomRight.w);
++    float topleft4 = min(min(min(topleft.y,topleft.x),topleft.z),topleft.w);
++
++    float depthclip = 0.0;
++    if (maxC < 1.0 - 1.0e-05f)
++    {
++        float topRight4 = min(min(min(topRight.y,topRight.x),topRight.z),topRight.w);
++        float bottomLeft4 = min(min(min(bottomLeft.y,bottomLeft.x),bottomLeft.z),bottomLeft.w);
++        float bottomRight4 = min(min(min(bottomRight.y,bottomRight.x),bottomRight.z),bottomRight.w);
++
++        float Wdepth = 0.0;
++        float Ksep = 1.37e-05f;
++        float Kfov = params.cameraFovAngleHor;
++        float diagonal_length = length(vec2(params.renderSize));
++        float Ksep_Kfov_diagonal = Ksep * Kfov * diagonal_length;
++
++        float Depthsep = Ksep_Kfov_diagonal * (1.0 - maxC);
++        float EPSILON = 1.19e-07f;
++        Wdepth += clamp((Depthsep / (abs(maxC - topleft4) + EPSILON)), 0.0, 1.0);
++        Wdepth += clamp((Depthsep / (abs(maxC - topRight4) + EPSILON)), 0.0, 1.0);
++        Wdepth += clamp((Depthsep / (abs(maxC - bottomLeft4) + EPSILON)), 0.0, 1.0);
++        Wdepth += clamp((Depthsep / (abs(maxC - bottomRight4) + EPSILON)), 0.0, 1.0);
++        depthclip = clamp(1.0f - Wdepth*0.25, 0.0, 1.0);
++    }
++
++    // Render pixels, previous - current  ->  clip units (2 per render size), current - previous.
++    vec2 motion = -texelFetch(InputMotion, InputPos, 0).xy * 2.0 * params.renderSizeRcp;
++
++    ////////////compute luma
++    vec3 Colorrgb = texelFetch(InputColor, InputPos, 0).xyz;
++
++    ///simple tonemap
++    float ColorMax = max(max(Colorrgb.x, Colorrgb.y), Colorrgb.z) + Exposure_co_rcp;
++    Colorrgb /= vec3(ColorMax);
++
++    vec3 Colorycocg;
++    Colorycocg.x = 0.25 * (Colorrgb.x + 2.0 * Colorrgb.y + Colorrgb.z);
++    Colorycocg.y = clamp(0.5 * Colorrgb.x + 0.5 - 0.5 * Colorrgb.z, 0.0, 1.0);
++    Colorycocg.z = clamp(Colorycocg.x + Colorycocg.y - Colorrgb.x, 0.0, 1.0);
++
++    //now color YCoCG all in the range of [0,1]
++    uint x11 = uint(Colorycocg.x * 2047.5);
++    uint y11 = uint(Colorycocg.y * 2047.5);
++    uint z10 = uint(Colorycocg.z * 1023.5);
++
++    imageStore(YCoCgColor, InputPos, uvec4(((x11 << 21u) | (y11 << 10u)) | z10));
++
++    vec4 v29 = vec4(motion, depthclip, ColorMax);
++    imageStore(MotionDepthClipAlphaBuffer, InputPos, v29);
++}
+diff --git a/gpu/shadps4/video_core/host_shaders/gsr2_upscale.comp b/gpu/shadps4/video_core/host_shaders/gsr2_upscale.comp
+new file mode 100644
+index 0000000..5ff774d
+--- /dev/null
++++ b/gpu/shadps4/video_core/host_shaders/gsr2_upscale.comp
+@@ -0,0 +1,358 @@
++#version 450
++
++//============================================================================================================
++//
++//
++//                  Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
++//                              SPDX-License-Identifier: BSD-3-Clause
++//
++//============================================================================================================
++
++// bbport: derived from Snapdragon GSR 2, glsl_2_pass_cs/sgsr2_upscale.comp (upstream commit
++// d926f074, gpu/third_party/snapdragon-gsr2). Changes: Vulkan binding numbers that do not overlap,
++// parameters as push constants (no UBO), bounds checks (dispatch edge groups, the bottom-right
++// YCoCg fetch), alpha 1 in the output, the history read back with a Catmull-Rom filter
++// (historyFilter 1; 0 = upstream's single bilinear fetch, which softens a little more every frame).
++// The filter itself is upstream's.
++
++float FastLanczos(float base)
++{
++	float y = base - 1.0f;
++	float y2 = y * y;
++	float y_temp = 0.75f * y + y2;
++	return y_temp * y2;
++}
++
++vec3 DecodeColor(uint sample32)
++{
++	uint x11 = sample32 >> 21u;
++	uint y11 = sample32 & (2047u << 10u);
++	uint z10 = sample32 & 1023u;
++	vec3 samplecolor;
++	samplecolor.x = (float(x11) * (1.0 / 2047.5));
++	samplecolor.y = (float(y11) * (4.76953602e-7)) - 0.5;
++	samplecolor.z = (float(z10) * (1.0 / 1023.5)) - 0.5;
++
++	return samplecolor;
++}
++
++layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
++layout(binding = 0) uniform sampler2D PrevHistoryOutput;
++layout(binding = 1) uniform sampler2D MotionDepthClipAlphaBuffer;
++layout(binding = 2) uniform usampler2D YCoCgColor;
++layout(binding = 3, rgba16f) uniform writeonly image2D SceneColorOutput;
++layout(binding = 4, rgba16f) uniform writeonly image2D HistoryOutput;
++
++layout(push_constant) uniform Params
++{
++    uvec2 renderSize;
++    uvec2 displaySize;
++    vec2  renderSizeRcp;
++    vec2  displaySizeRcp;
++    vec2  jitterOffset;
++    float preExposure;
++    float cameraFovAngleHor;
++    float MinLerpContribution;
++    uint  sameCameraFrmNum;
++    uint  reset;
++    uint  historyFilter;
++} params;
++
++// bbport: the previous output through a Catmull-Rom kernel, the 9-tap form collapsed to 5 bilinear
++// fetches (Jimenez, "Filmic SMAA"; the corner taps are dropped and the weights renormalised).
++// PrevHistoryOutput must have a linear sampler. Ringing is left to the color box clamp in main().
++vec3 SampleHistoryCatmullRom(vec2 uv)
++{
++    vec2 size = vec2(textureSize(PrevHistoryOutput, 0));
++    vec2 pos = uv * size;
++    vec2 center = floor(pos - 0.5) + 0.5;
++    vec2 f = pos - center;
++    vec2 f2 = f * f;
++    vec2 f3 = f2 * f;
++    vec2 w0 = -0.5 * f3 + f2 - 0.5 * f;
++    vec2 w1 = 1.5 * f3 - 2.5 * f2 + 1.0;
++    vec2 w2 = -1.5 * f3 + 2.0 * f2 + 0.5 * f;
++    vec2 w3 = 0.5 * f3 - 0.5 * f2;
++    vec2 w12 = w1 + w2;
++    vec2 tc12 = (center + w2 / w12) / size;
++    vec2 tc0 = (center - 1.0) / size;
++    vec2 tc3 = (center + 2.0) / size;
++    vec3 c = textureLod(PrevHistoryOutput, vec2(tc12.x, tc0.y), 0.0).xyz * (w12.x * w0.y)
++           + textureLod(PrevHistoryOutput, vec2(tc0.x, tc12.y), 0.0).xyz * (w0.x * w12.y)
++           + textureLod(PrevHistoryOutput, vec2(tc12.x, tc12.y), 0.0).xyz * (w12.x * w12.y)
++           + textureLod(PrevHistoryOutput, vec2(tc3.x, tc12.y), 0.0).xyz * (w3.x * w12.y)
++           + textureLod(PrevHistoryOutput, vec2(tc12.x, tc3.y), 0.0).xyz * (w12.x * w3.y);
++    float wsum = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
++    return c / wsum;
++}
++
++void main()
++{
++    if (any(greaterThanEqual(gl_GlobalInvocationID.xy, params.displaySize))) return;
++    float Biasmax_viewportXScale = min(float(params.displaySize.x) / float(params.renderSize.x), 1.99);  //Biasmax_viewportXScale
++    float scalefactor = min(20.0, pow((float(params.displaySize.x) / float(params.renderSize.x)) * (float(params.displaySize.y) / float(params.renderSize.y)), 3.0));
++    float f2 = params.preExposure;            //1.0;   //preExposure
++    vec2 HistoryInfoViewportSizeInverse = params.displaySizeRcp;
++    vec2 HistoryInfoViewportSize = vec2(params.displaySize);
++    vec2 InputJitter = params.jitterOffset;
++    vec2 InputInfoViewportSize = vec2(params.renderSize);
++    vec2 Hruv = (vec2(gl_GlobalInvocationID.xy) + vec2(0.5)) * HistoryInfoViewportSizeInverse;
++    vec2 Jitteruv;
++    Jitteruv.x = clamp(Hruv.x + (InputJitter.x * params.renderSizeRcp.x), 0.0, 1.0);
++    Jitteruv.y = clamp(Hruv.y + (InputJitter.y * params.renderSizeRcp.y), 0.0, 1.0);
++
++    ivec2 InputPos = ivec2(Jitteruv * InputInfoViewportSize);
++    vec4 mda = textureLod(MotionDepthClipAlphaBuffer, Jitteruv, 0.0).xyzw;
++    vec2 Motion = mda.xy;
++
++    ///ScreenPosToViewportScale&Bias
++    vec2 PrevUV = clamp(-0.5 * Motion + Hruv, vec2(0.0), vec2(1.0)); // +y down
++
++    float depthfactor = mda.z;
++    float ColorMax = mda.w;
++
++    vec4 History = textureLod(PrevHistoryOutput, PrevUV, 0.0);
++    vec3 HistoryColor = params.historyFilter != 0u ? SampleHistoryCatmullRom(PrevUV) : History.xyz;
++    float Historyw = History.w;
++    float Wfactor = clamp(abs(Historyw), 0.0, 1.0);
++
++    /////upsample and compute box
++    vec4 Upsampledcw = vec4(0.0);
++    float kernelfactor = clamp(Wfactor + float(params.reset), 0.0, 1.0);
++    float biasmax = Biasmax_viewportXScale - Biasmax_viewportXScale * kernelfactor;
++    float biasmin = max(1.0f, 0.3 + 0.3 * biasmax);
++    float biasfactor = max(0.25f * depthfactor, kernelfactor);
++    float kernelbias = mix(biasmax, biasmin, biasfactor);
++    float motion_viewport_len = length(Motion * HistoryInfoViewportSize);
++    float curvebias = mix(-2.0, -3.0, clamp(motion_viewport_len * 0.02, 0.0, 1.0));
++
++    vec3 rectboxcenter = vec3(0.0);
++    vec3 rectboxvar = vec3(0.0);
++    float rectboxweight = 0.0;
++    vec2 srcpos = vec2(InputPos) + vec2(0.5) - InputJitter;
++    vec2 srcOutputPos = Hruv * InputInfoViewportSize;
++
++    kernelbias *= 0.5f;
++    float kernelbias2 = kernelbias * kernelbias;
++    vec2 srcpos_srcOutputPos = srcpos - srcOutputPos;
++
++    ivec2 InputPosBtmRight = ivec2(1) + InputPos;
++    vec2 gatherCoord = vec2(InputPos) * params.renderSizeRcp;
++    uint btmRight = texelFetch(YCoCgColor, min(InputPosBtmRight, ivec2(params.renderSize) - 1), 0).x;
++    uvec4 topleft = textureGather(YCoCgColor, gatherCoord);
++    uvec2 topRight;
++    uvec2 bottomLeft;
++
++    uint sameCameraFrmNum = params.sameCameraFrmNum;
++
++	if (sameCameraFrmNum!=0u)
++	{
++		topRight = textureGather(YCoCgColor, gatherCoord + vec2(params.renderSizeRcp.x, 0.0)).yz;
++		bottomLeft = textureGather(YCoCgColor, gatherCoord + vec2(0.0, params.renderSizeRcp.y)).xy;
++	}
++	else
++	{
++		uvec2 btmRight = textureGather(YCoCgColor, gatherCoord + vec2(params.renderSizeRcp.x, params.renderSizeRcp.y)).xz;
++		bottomLeft.y = btmRight.x;
++		topRight.x = btmRight.y;
++	}
++
++    vec3 rectboxmin;
++    vec3 rectboxmax;
++    {
++        vec3 samplecolor = DecodeColor(bottomLeft.y);
++        vec2 baseoffset = srcpos_srcOutputPos + vec2(0.0, 1.0);
++        float baseoffset_dot = dot(baseoffset, baseoffset);
++        float base = clamp(baseoffset_dot * kernelbias2, 0.0f, 1.0f);
++        float weight = FastLanczos(base);
++        Upsampledcw += vec4(samplecolor * weight, weight);
++        float boxweight = exp(baseoffset_dot * curvebias);
++        rectboxmin = samplecolor;
++        rectboxmax = samplecolor;
++        vec3 wsample = samplecolor * boxweight;
++        rectboxcenter += wsample;
++        rectboxvar += (samplecolor * wsample);
++        rectboxweight += boxweight;
++    }
++    {
++        vec3 samplecolor = DecodeColor(topRight.x);
++        vec2 baseoffset = srcpos_srcOutputPos + vec2(1.0, 0.0);
++        float baseoffset_dot = dot(baseoffset, baseoffset);
++        float base = clamp(baseoffset_dot * kernelbias2, 0.0f, 1.0f);
++        float weight = FastLanczos(base);
++        Upsampledcw += vec4(samplecolor * weight, weight);
++        float boxweight = exp(baseoffset_dot * curvebias);
++        rectboxmin = min(rectboxmin, samplecolor);
++        rectboxmax = max(rectboxmax, samplecolor);
++        vec3 wsample = samplecolor * boxweight;
++        rectboxcenter += wsample;
++        rectboxvar += (samplecolor * wsample);
++        rectboxweight += boxweight;
++    }
++    {
++        vec3 samplecolor = DecodeColor(topleft.x);
++        vec2 baseoffset = srcpos_srcOutputPos + vec2(-1.0, 0.0);
++        float baseoffset_dot = dot(baseoffset, baseoffset);
++        float base = clamp(baseoffset_dot * kernelbias2, 0.0f, 1.0f);
++        float weight = FastLanczos(base);
++        Upsampledcw += vec4(samplecolor * weight, weight);
++        float boxweight = exp(baseoffset_dot * curvebias);
++        rectboxmin = min(rectboxmin, samplecolor);
++        rectboxmax = max(rectboxmax, samplecolor);
++        vec3 wsample = samplecolor * boxweight;
++        rectboxcenter += wsample;
++        rectboxvar += (samplecolor * wsample);
++        rectboxweight += boxweight;
++    }
++    {
++        vec3 samplecolor = DecodeColor(topleft.y);
++        vec2 baseoffset = srcpos_srcOutputPos;
++        float baseoffset_dot = dot(baseoffset, baseoffset);
++        float base = clamp(baseoffset_dot * kernelbias2, 0.0f, 1.0f);
++        float weight = FastLanczos(base);
++        Upsampledcw += vec4(samplecolor * weight, weight);
++        float boxweight = exp(baseoffset_dot * curvebias);
++        rectboxmin = min(rectboxmin, samplecolor);
++        rectboxmax = max(rectboxmax, samplecolor);
++        vec3 wsample = samplecolor * boxweight;
++        rectboxcenter += wsample;
++        rectboxvar += (samplecolor * wsample);
++        rectboxweight += boxweight;
++    }
++    {
++        vec3 samplecolor = DecodeColor(topleft.z);
++        vec2 baseoffset = srcpos_srcOutputPos + vec2(0.0, -1.0);
++        float baseoffset_dot = dot(baseoffset, baseoffset);
++        float base = clamp(baseoffset_dot * kernelbias2, 0.0f, 1.0f);
++        float weight = FastLanczos(base);
++        Upsampledcw += vec4(samplecolor * weight, weight);
++        float boxweight = exp(baseoffset_dot * curvebias);
++        rectboxmin = min(rectboxmin, samplecolor);
++        rectboxmax = max(rectboxmax, samplecolor);
++        vec3 wsample = samplecolor * boxweight;
++        rectboxcenter += wsample;
++        rectboxvar += (samplecolor * wsample);
++        rectboxweight += boxweight;
++    }
++
++    if (sameCameraFrmNum!=0u)
++    {
++        {
++            vec3 samplecolor = DecodeColor(btmRight);
++            vec2 baseoffset = srcpos_srcOutputPos + vec2(1.0, 1.0);
++            float baseoffset_dot = dot(baseoffset, baseoffset);
++            float base = clamp(baseoffset_dot * kernelbias2, 0.0, 1.0);
++            float weight = FastLanczos(base);
++            Upsampledcw += vec4(samplecolor * weight, weight);
++            float boxweight = exp(baseoffset_dot * curvebias);
++            rectboxmin = min(rectboxmin, samplecolor);
++            rectboxmax = max(rectboxmax, samplecolor);
++            vec3 wsample = samplecolor * boxweight;
++            rectboxcenter += wsample;
++            rectboxvar += (samplecolor * wsample);
++            rectboxweight += boxweight;
++        }
++        {
++            vec3 samplecolor = DecodeColor(bottomLeft.x);
++            vec2 baseoffset = srcpos_srcOutputPos + vec2(-1.0, 1.0);
++            float baseoffset_dot = dot(baseoffset, baseoffset);
++            float base = clamp(baseoffset_dot * kernelbias2, 0.0f, 1.0f);
++            float weight = FastLanczos(base);
++            Upsampledcw += vec4(samplecolor * weight, weight);
++            float boxweight = exp(baseoffset_dot * curvebias);
++            rectboxmin = min(rectboxmin, samplecolor);
++            rectboxmax = max(rectboxmax, samplecolor);
++            vec3 wsample = samplecolor * boxweight;
++            rectboxcenter += wsample;
++            rectboxvar += (samplecolor * wsample);
++            rectboxweight += boxweight;
++        }
++        {
++            vec3 samplecolor = DecodeColor(topRight.y);
++            vec2 baseoffset = srcpos_srcOutputPos + vec2(1.0, -1.0);
++            float baseoffset_dot = dot(baseoffset, baseoffset);
++            float base = clamp(baseoffset_dot * kernelbias2, 0.0f, 1.0f);
++            float weight = FastLanczos(base);
++            Upsampledcw += vec4(samplecolor * weight, weight);
++            float boxweight = exp(baseoffset_dot * curvebias);
++            rectboxmin = min(rectboxmin, samplecolor);
++            rectboxmax = max(rectboxmax, samplecolor);
++            vec3 wsample = samplecolor * boxweight;
++            rectboxcenter += wsample;
++            rectboxvar += (samplecolor * wsample);
++            rectboxweight += boxweight;
++        }
++
++        {
++            vec3 samplecolor = DecodeColor(topleft.w);
++            vec2 baseoffset = srcpos_srcOutputPos + vec2(-1.0, -1.0);
++            float baseoffset_dot = dot(baseoffset, baseoffset);
++            float base = clamp(baseoffset_dot * kernelbias2, 0.0f, 1.0f);
++            float weight = FastLanczos(base);
++            Upsampledcw += vec4(samplecolor * weight, weight);
++            float boxweight = exp(baseoffset_dot * curvebias);
++            rectboxmin = min(rectboxmin, samplecolor);
++            rectboxmax = max(rectboxmax, samplecolor);
++            vec3 wsample = samplecolor * boxweight;
++            rectboxcenter += wsample;
++            rectboxvar += (samplecolor * wsample);
++            rectboxweight += boxweight;
++        }
++    }
++
++    rectboxweight = 1.0 / rectboxweight;
++    rectboxcenter *= rectboxweight;
++    rectboxvar *= rectboxweight;
++    rectboxvar = sqrt(abs(rectboxvar - rectboxcenter * rectboxcenter));
++
++    Upsampledcw.xyz =  clamp(Upsampledcw.xyz / Upsampledcw.w, rectboxmin-vec3(0.05), rectboxmax+vec3(0.05));
++    Upsampledcw.w = Upsampledcw.w * (1.0f / 3.0f) ;
++
++	float OneMinusWfactor = 1.0f - Wfactor;
++
++    float baseupdate = OneMinusWfactor - OneMinusWfactor * depthfactor;
++    baseupdate = min(baseupdate, mix(baseupdate, Upsampledcw.w *10.0f, clamp(10.0f* motion_viewport_len, 0.0, 1.0)));
++    baseupdate = min(baseupdate, mix(baseupdate, Upsampledcw.w, clamp(motion_viewport_len *0.05f, 0.0, 1.0)));
++    float basealpha = baseupdate;
++
++    const float EPSILON = 1.192e-07f;
++    float boxscale = max(depthfactor, clamp(motion_viewport_len * 0.05f, 0.0, 1.0));
++    float boxsize = mix(scalefactor, 1.0f, boxscale);
++    vec3 sboxvar = rectboxvar * boxsize;
++    vec3 boxmin = rectboxcenter - sboxvar;
++    vec3 boxmax = rectboxcenter + sboxvar;
++    rectboxmax = min(rectboxmax, boxmax);
++    rectboxmin = max(rectboxmin, boxmin);
++
++    vec3 clampedcolor = clamp(HistoryColor, rectboxmin, rectboxmax);
++    float startLerpValue = params.MinLerpContribution; //params.MinLerpContribution; //MinLerpContribution;
++    if ((abs(mda.x) + abs(mda.y)) > 0.000001) startLerpValue = 0.0;
++	float lerpcontribution = (any(greaterThan(rectboxmin, HistoryColor)) || any(greaterThan(HistoryColor, rectboxmax))) ? startLerpValue : 1.0f;
++
++	HistoryColor = mix(clampedcolor, HistoryColor, clamp(lerpcontribution, 0.0, 1.0));
++    float basemin = min(basealpha, 0.1f);
++    basealpha = mix(basemin, basealpha, clamp(lerpcontribution, 0.0, 1.0));
++
++    ////blend color
++    float alphasum = max(EPSILON, basealpha + Upsampledcw.w);
++    float alpha = clamp(Upsampledcw.w / alphasum + float(params.reset), 0.0, 1.0);
++    Upsampledcw.xyz = mix(HistoryColor, Upsampledcw.xyz, alpha);
++
++    imageStore(HistoryOutput, ivec2(gl_GlobalInvocationID.xy), vec4(Upsampledcw.xyz, Wfactor));
++
++    ////ycocg to rgb
++    float x_z = Upsampledcw.x - Upsampledcw.z;
++    Upsampledcw.xyz = vec3(
++        clamp(x_z + Upsampledcw.y, 0.0, 1.0),
++        clamp(Upsampledcw.x + Upsampledcw.z, 0.0, 1.0),
++        clamp(x_z - Upsampledcw.y, 0.0, 1.0));
++
++    float compMax = max(Upsampledcw.x, Upsampledcw.y);
++    compMax = clamp(max(compMax, Upsampledcw.z), 0.0f, 1.0f);
++    float scale = params.preExposure /  ((1.0f + 600.0f / 65504.0f) - compMax);
++
++    if (ColorMax > 4000.0f) scale = ColorMax;
++    Upsampledcw.xyz = Upsampledcw.xyz * scale;
++    imageStore(SceneColorOutput, ivec2(gl_GlobalInvocationID.xy), vec4(Upsampledcw.xyz, 1.0));
++
++}
 diff --git a/gpu/shadps4/video_core/page_manager.cpp b/gpu/shadps4/video_core/page_manager.cpp
 index 7f4f512..48e403b 100644
 --- a/gpu/shadps4/video_core/page_manager.cpp
@@ -93,6 +575,500 @@ index 7f4f512..48e403b 100644
 -#ifdef __linux__
 +#if defined(__linux__) && !defined(__ANDROID__)
      if (std::getenv("SPARTAN_UFFD") && std::getenv("SPARTAN_UFFD")[0] == '1') {
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_gsr2.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_gsr2.cpp
+new file mode 100644
+index 0000000..3d20f76
+--- /dev/null
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_gsr2.cpp
+@@ -0,0 +1,435 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++// Adapted from ducvd89/Bloodborne-Android (1600cc0).
++#include "video_core/renderer_vulkan/vk_gsr2.h"
++
++#include <algorithm>
++#include <chrono>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <utility>
++
++#include "video_core/host_shaders/gsr2_convert_comp.h"
++#include "video_core/host_shaders/gsr2_upscale_comp.h"
++#include "video_core/renderer_vulkan/vk_instance.h"
++#include "video_core/renderer_vulkan/vk_platform.h"
++#include "video_core/renderer_vulkan/vk_scheduler.h"
++#include "video_core/renderer_vulkan/vk_shader_util.h"
++#include "video_core/texture_cache/image.h"
++
++namespace Vulkan {
++
++namespace {
++
++/// The shaders' push constants (gsr2_convert.comp / gsr2_upscale.comp): 64 bytes.
++struct Params {
++    u32 render_size[2];
++    u32 display_size[2];
++    float render_size_rcp[2];
++    float display_size_rcp[2];
++    float jitter[2];
++    float pre_exposure;
++    float camera_fov_horizontal;
++    float min_lerp_contribution;
++    u32 same_camera;
++    u32 reset;
++    u32 history_filter; ///< gsr2_upscale.comp only: 1 = Catmull-Rom history, 0 = bilinear
++};
++static_assert(sizeof(Params) == 64);
++
++constexpr u32 kSlices = 4;     ///< profile results are read this many frames later
++constexpr u32 kQueries = 3;    ///< start, after convert, after upscale
++
++} // namespace
++
++struct GsrUpscaler::Impl {
++    const Instance& instance;
++    Scheduler& scheduler;
++    vk::Device device;
++
++    vk::UniqueDescriptorSetLayout convert_layout, upscale_layout;
++    vk::UniquePipelineLayout convert_pipeline_layout, upscale_pipeline_layout;
++    vk::UniquePipeline convert_pipeline, upscale_pipeline;
++    vk::UniqueSampler nearest, linear;
++    bool pipelines_ok = false;
++    bool pipelines_failed = false;
++
++    // Render-size intermediates and display-size history (two, swapped every frame).
++    VideoCore::UniqueImage mdc_image, ycocg_image;
++    VideoCore::UniqueImage history_image[2];
++    vk::UniqueImageView mdc_view, ycocg_view, history_view[2];
++    u32 render_w = 0, render_h = 0, display_w = 0, display_h = 0;
++    u32 current = 0;
++    bool fresh = true;
++
++    // BB_GSR2_PROFILE=1
++    const bool profile = [] {
++        const char* env = std::getenv("BB_GSR2_PROFILE");
++        return env && env[0] == '1';
++    }();
++    // The 9-sample kernel always (sharper while the camera moves: the 5-sample one softens a
++    // 3x upscale). BB_GSR2_NINE_TAP=0: only when the camera stands still, as upstream's bSameCamera.
++    const bool force_nine_tap = [] {
++        const char* env = std::getenv("BB_GSR2_NINE_TAP");
++        return !(env && env[0] == '0');
++    }();
++    // BB_GSR2_MIN_LERP=<0..1>: upstream's minLerpContribution (history kept when it leaves the
++    // color box); the sample framework uses 0.25.
++    const float min_lerp = [] {
++        const char* env = std::getenv("BB_GSR2_MIN_LERP");
++        return env && env[0] ? std::clamp(float(std::atof(env)), 0.0f, 1.0f) : 0.25f;
++    }();
++    // BB_GSR2_HISTORY=bilinear (or 0): upstream's single bilinear history fetch (default: a
++    // Catmull-Rom filter, which does not blur the history a little more every frame).
++    const bool history_catmull_rom = [] {
++        const char* env = std::getenv("BB_GSR2_HISTORY");
++        return !(env && (std::strcmp(env, "bilinear") == 0 || std::strcmp(env, "0") == 0));
++    }();
++    vk::UniqueQueryPool pool;
++    double period_ns = 1.0;
++    u64 frames = 0;
++    std::array<bool, kSlices> recorded{};
++    double sum_convert = 0.0, sum_upscale = 0.0;
++    u32 samples = 0;
++    std::chrono::steady_clock::time_point window = std::chrono::steady_clock::now();
++
++    Impl(const Instance& instance_, Scheduler& scheduler_)
++        : instance{instance_}, scheduler{scheduler_}, device{instance_.GetDevice()} {}
++
++    ~Impl() {
++        if (mdc_image || history_image[0]) {
++            scheduler.Finish();
++        }
++    }
++
++    bool CreatePipelines() {
++        if (pipelines_ok) {
++            return true;
++        }
++        if (pipelines_failed) {
++            return false;
++        }
++        const auto make_layout = [&](u32 samplers, u32 storages, vk::UniqueDescriptorSetLayout& layout,
++                                     vk::UniquePipelineLayout& pipeline_layout) {
++            std::array<vk::DescriptorSetLayoutBinding, 5> bindings{};
++            for (u32 i = 0; i < samplers + storages; ++i) {
++                bindings[i] = {.binding = i,
++                               .descriptorType = i < samplers
++                                                     ? vk::DescriptorType::eCombinedImageSampler
++                                                     : vk::DescriptorType::eStorageImage,
++                               .descriptorCount = 1,
++                               .stageFlags = vk::ShaderStageFlagBits::eCompute};
++            }
++            layout = Check(device.createDescriptorSetLayoutUnique({
++                .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
++                .bindingCount = samplers + storages,
++                .pBindings = bindings.data(),
++            }));
++            const vk::PushConstantRange push{vk::ShaderStageFlagBits::eCompute, 0, sizeof(Params)};
++            pipeline_layout = Check(device.createPipelineLayoutUnique({
++                .setLayoutCount = 1,
++                .pSetLayouts = &*layout,
++                .pushConstantRangeCount = 1,
++                .pPushConstantRanges = &push,
++            }));
++        };
++        make_layout(3, 2, convert_layout, convert_pipeline_layout);
++        make_layout(3, 2, upscale_layout, upscale_pipeline_layout);
++        const auto sampler = [&](vk::Filter filter) {
++            return Check(device.createSamplerUnique({
++                .magFilter = filter, .minFilter = filter,
++                .mipmapMode = vk::SamplerMipmapMode::eNearest,
++                .addressModeU = vk::SamplerAddressMode::eClampToEdge,
++                .addressModeV = vk::SamplerAddressMode::eClampToEdge,
++                .addressModeW = vk::SamplerAddressMode::eClampToEdge,
++            }));
++        };
++        nearest = sampler(vk::Filter::eNearest);
++        linear = sampler(vk::Filter::eLinear);
++        const auto compute = [&](const auto& code, vk::PipelineLayout layout) {
++            const auto module = CompileSPV(code, device);
++            auto [result, pipeline] = device.createComputePipelineUnique({}, vk::ComputePipelineCreateInfo{
++                .stage = {.stage = vk::ShaderStageFlagBits::eCompute, .module = module, .pName = "main"},
++                .layout = layout,
++            });
++            device.destroyShaderModule(module);
++            return result == vk::Result::eSuccess ? std::move(pipeline) : vk::UniquePipeline{};
++        };
++        convert_pipeline = compute(GSR2_CONVERT_COMP, *convert_pipeline_layout);
++        upscale_pipeline = compute(GSR2_UPSCALE_COMP, *upscale_pipeline_layout);
++        if (!convert_pipeline || !upscale_pipeline) {
++            pipelines_failed = true;
++            return false;
++        }
++        if (profile) {
++            pool = Check(device.createQueryPoolUnique({.queryType = vk::QueryType::eTimestamp,
++                                                       .queryCount = kSlices * kQueries}));
++            period_ns = instance.GetPhysicalDevice().getProperties().limits.timestampPeriod;
++        }
++        pipelines_ok = true;
++        return true;
++    }
++
++    void MakeImage(VideoCore::UniqueImage& image, vk::UniqueImageView& view, vk::Format format,
++                   u32 width, u32 height, vk::ImageUsageFlags usage) {
++        view.reset();
++        image = VideoCore::UniqueImage(device, instance.GetAllocator());
++        image.Create(vk::ImageCreateInfo{
++            .imageType = vk::ImageType::e2D,
++            .format = format,
++            .extent = {width, height, 1},
++            .mipLevels = 1,
++            .arrayLayers = 1,
++            .samples = vk::SampleCountFlagBits::e1,
++            .tiling = vk::ImageTiling::eOptimal,
++            .usage = usage,
++            .initialLayout = vk::ImageLayout::eUndefined,
++        });
++        view = Check(device.createImageViewUnique({
++            .image = vk::Image(image),
++            .viewType = vk::ImageViewType::e2D,
++            .format = format,
++            .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
++        }));
++    }
++
++    void EnsureImages(u32 rw, u32 rh, u32 ow, u32 oh) {
++        if (mdc_image && rw == render_w && rh == render_h && ow == display_w && oh == display_h) {
++            return;
++        }
++        // Submitted frames may still use the old images: destroyed once the GPU is past them
++        // (Finish() here would send the command buffer being recorded).
++        if (mdc_image) {
++            scheduler.DeferOperation([images = std::array{std::move(mdc_image), std::move(ycocg_image),
++                                                          std::move(history_image[0]),
++                                                          std::move(history_image[1])},
++                                      views = std::array{std::move(mdc_view), std::move(ycocg_view),
++                                                         std::move(history_view[0]),
++                                                         std::move(history_view[1])}]() mutable {
++                for (auto& view : views) view.reset();
++                for (auto& image : images) image.Destroy();
++            });
++        }
++        const auto sampled_storage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled;
++        MakeImage(mdc_image, mdc_view, vk::Format::eR16G16B16A16Sfloat, rw, rh, sampled_storage);
++        MakeImage(ycocg_image, ycocg_view, vk::Format::eR32Uint, rw, rh, sampled_storage);
++        for (u32 i = 0; i < 2; ++i) {
++            MakeImage(history_image[i], history_view[i], vk::Format::eR16G16B16A16Sfloat, ow, oh,
++                      sampled_storage | vk::ImageUsageFlagBits::eTransferDst);
++        }
++        render_w = rw;
++        render_h = rh;
++        display_w = ow;
++        display_h = oh;
++        current = 0;
++        fresh = true;
++        std::printf("Upscaler: GSR 2 %ux%u -> %ux%u\n", rw, rh, ow, oh);
++        std::printf(history_catmull_rom
++                        ? "Upscaler: GSR 2 history Catmull-Rom (BB_GSR2_HISTORY=bilinear: upstream's bilinear)\n"
++                        : "Upscaler: GSR 2 history bilinear (upstream's; default: Catmull-Rom)\n");
++        std::printf(force_nine_tap
++                        ? "Upscaler: GSR 2 9-sample kernel always (BB_GSR2_NINE_TAP=0: only with the camera still)\n"
++                        : "Upscaler: GSR 2 9-sample kernel only with the camera still (upstream's)\n");
++    }
++
++    void CollectProfile(u32 slice) {
++        if (!recorded[slice]) {
++            return;
++        }
++        std::array<u64, kQueries * 2> data{}; // value, availability
++        const auto result = device.getQueryPoolResults(
++            *pool, slice * kQueries, kQueries, sizeof(data), data.data(), 2 * sizeof(u64),
++            vk::QueryResultFlagBits::e64 | vk::QueryResultFlagBits::eWithAvailability);
++        if (result != vk::Result::eSuccess || !data[1] || !data[3] || !data[5]) {
++            return; // not finished yet: tried again at the slice's next turn
++        }
++        recorded[slice] = false;
++        sum_convert += double(data[2] - data[0]) * period_ns * 1e-6;
++        sum_upscale += double(data[4] - data[2]) * period_ns * 1e-6;
++        ++samples;
++        const auto now = std::chrono::steady_clock::now();
++        if (now - window >= std::chrono::seconds(5) && samples) {
++            std::printf("GSR 2 GPU: convert %.3f ms, upscale %.3f ms, total %.3f ms "
++                        "(%u frames, %ux%u -> %ux%u)\n",
++                        sum_convert / samples, sum_upscale / samples,
++                        (sum_convert + sum_upscale) / samples, samples, render_w, render_h,
++                        display_w, display_h);
++            sum_convert = sum_upscale = 0.0;
++            samples = 0;
++            window = now;
++        }
++    }
++
++    bool Record(const Frame& frame) {
++        if (!CreatePipelines()) {
++            return false;
++        }
++        EnsureImages(frame.render_width, frame.render_height, frame.output_width,
++                     frame.output_height);
++        const auto cmd = frame.cmdbuf;
++        const u32 slice = u32(frames % kSlices);
++        if (profile) {
++            CollectProfile(slice);
++            cmd.resetQueryPool(*pool, slice * kQueries, kQueries);
++            cmd.writeTimestamp2(vk::PipelineStageFlagBits2::eAllCommands, *pool, slice * kQueries);
++        }
++        const bool clear = frame.reset || fresh;
++        const auto all = vk::PipelineStageFlagBits2::eAllCommands;
++        const auto compute = vk::PipelineStageFlagBits2::eComputeShader;
++        const auto range = vk::ImageSubresourceRange{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
++        const auto previous = 1 - current;
++
++        // The scene, depth and motion writes, and last frame's history use, before this frame.
++        const vk::MemoryBarrier2 inputs{
++            .srcStageMask = all,
++            .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite | vk::AccessFlagBits2::eShaderStorageWrite,
++            .dstStageMask = compute,
++            .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
++        };
++        const auto rw = vk::AccessFlagBits2::eShaderStorageRead | vk::AccessFlagBits2::eShaderStorageWrite;
++        const auto rw_all = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
++        std::array<vk::ImageMemoryBarrier2, 4> barriers{};
++        // Intermediates and the output: contents are rewritten every frame.
++        barriers[0] = {.srcStageMask = all, .srcAccessMask = rw_all, .dstStageMask = compute,
++                       .dstAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
++                       .oldLayout = vk::ImageLayout::eUndefined, .newLayout = vk::ImageLayout::eGeneral,
++                       .image = vk::Image(mdc_image), .subresourceRange = range};
++        barriers[1] = barriers[0];
++        barriers[1].image = vk::Image(ycocg_image);
++        // The history written this frame (read two frames ago); the one read keeps its contents
++        // unless this frame starts over (then both are cleared below).
++        barriers[2] = barriers[0];
++        barriers[2].dstAccessMask = rw;
++        barriers[2].image = vk::Image(history_image[current]);
++        barriers[2].oldLayout = clear ? vk::ImageLayout::eUndefined : vk::ImageLayout::eGeneral;
++        barriers[3] = barriers[2];
++        barriers[3].dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead;
++        barriers[3].image = vk::Image(history_image[previous]);
++        if (clear) {
++            // No stale or uninitialized history (NaN would survive a zero weight).
++            for (auto* b : {&barriers[2], &barriers[3]}) {
++                b->dstStageMask = vk::PipelineStageFlagBits2::eClear;
++                b->dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
++                b->newLayout = vk::ImageLayout::eTransferDstOptimal;
++            }
++        }
++        cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &inputs,
++                              .imageMemoryBarrierCount = u32(barriers.size()),
++                              .pImageMemoryBarriers = barriers.data()});
++        if (clear) {
++            const vk::ClearColorValue zero{std::array<float, 4>{}};
++            for (u32 i = 0; i < 2; ++i) {
++                cmd.clearColorImage(vk::Image(history_image[i]), vk::ImageLayout::eTransferDstOptimal,
++                                    zero, range);
++            }
++            const std::array<vk::ImageMemoryBarrier2, 2> cleared{{
++                {.srcStageMask = vk::PipelineStageFlagBits2::eClear,
++                 .srcAccessMask = vk::AccessFlagBits2::eTransferWrite, .dstStageMask = compute,
++                 .dstAccessMask = rw, .oldLayout = vk::ImageLayout::eTransferDstOptimal,
++                 .newLayout = vk::ImageLayout::eGeneral,
++                 .image = vk::Image(history_image[current]), .subresourceRange = range},
++                {.srcStageMask = vk::PipelineStageFlagBits2::eClear,
++                 .srcAccessMask = vk::AccessFlagBits2::eTransferWrite, .dstStageMask = compute,
++                 .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
++                 .oldLayout = vk::ImageLayout::eTransferDstOptimal,
++                 .newLayout = vk::ImageLayout::eGeneral,
++                 .image = vk::Image(history_image[previous]), .subresourceRange = range},
++            }};
++            cmd.pipelineBarrier2({.imageMemoryBarrierCount = u32(cleared.size()),
++                                  .pImageMemoryBarriers = cleared.data()});
++        }
++
++        Params params{};
++        params.render_size[0] = frame.render_width;
++        params.render_size[1] = frame.render_height;
++        params.display_size[0] = frame.output_width;
++        params.display_size[1] = frame.output_height;
++        params.render_size_rcp[0] = 1.0f / float(frame.render_width);
++        params.render_size_rcp[1] = 1.0f / float(frame.render_height);
++        params.display_size_rcp[0] = 1.0f / float(frame.output_width);
++        params.display_size_rcp[1] = 1.0f / float(frame.output_height);
++        params.jitter[0] = frame.jitter[0];
++        params.jitter[1] = frame.jitter[1];
++        params.pre_exposure = 1.0f;
++        // tan(vertical fov / 2) * width / height
++        params.camera_fov_horizontal = std::tan(frame.vertical_fov * 0.5f) *
++                                       float(frame.render_width) / float(frame.render_height);
++        params.min_lerp_contribution = min_lerp;
++        params.same_camera = frame.camera_still || force_nine_tap ? 1u : 0u;
++        params.reset = clear ? 1u : 0u;
++        params.history_filter = history_catmull_rom ? 1u : 0u;
++
++        const auto image = [](vk::Sampler sampler, vk::ImageView view) {
++            return vk::DescriptorImageInfo{.sampler = sampler, .imageView = view,
++                                           .imageLayout = vk::ImageLayout::eGeneral};
++        };
++        const auto write = [](u32 binding, vk::DescriptorType type, const vk::DescriptorImageInfo* info) {
++            return vk::WriteDescriptorSet{.dstBinding = binding, .descriptorCount = 1,
++                                          .descriptorType = type, .pImageInfo = info};
++        };
++        constexpr auto sampled = vk::DescriptorType::eCombinedImageSampler;
++        constexpr auto storage = vk::DescriptorType::eStorageImage;
++
++        {
++            const std::array<vk::DescriptorImageInfo, 5> infos{
++                image(*nearest, frame.color), image(*nearest, frame.depth),
++                image(*nearest, frame.motion), image({}, *mdc_view), image({}, *ycocg_view)};
++            const std::array<vk::WriteDescriptorSet, 5> writes{
++                write(0, sampled, &infos[0]), write(1, sampled, &infos[1]),
++                write(2, sampled, &infos[2]), write(3, storage, &infos[3]),
++                write(4, storage, &infos[4])};
++            cmd.bindPipeline(vk::PipelineBindPoint::eCompute, *convert_pipeline);
++            cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *convert_pipeline_layout, 0,
++                                     writes);
++            cmd.pushConstants(*convert_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0,
++                              sizeof(params), &params);
++            cmd.dispatch((frame.render_width + 7) / 8, (frame.render_height + 7) / 8, 1);
++        }
++        if (profile) {
++            cmd.writeTimestamp2(all, *pool, slice * kQueries + 1);
++        }
++        const vk::MemoryBarrier2 converted{
++            .srcStageMask = compute,
++            .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
++            .dstStageMask = compute,
++            .dstAccessMask = vk::AccessFlagBits2::eShaderSampledRead,
++        };
++        cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &converted});
++        {
++            const std::array<vk::DescriptorImageInfo, 5> infos{
++                image(*linear, *history_view[previous]), image(*linear, *mdc_view),
++                image(*nearest, *ycocg_view), image({}, frame.output),
++                image({}, *history_view[current])};
++            const std::array<vk::WriteDescriptorSet, 5> writes{
++                write(0, sampled, &infos[0]), write(1, sampled, &infos[1]),
++                write(2, sampled, &infos[2]), write(3, storage, &infos[3]),
++                write(4, storage, &infos[4])};
++            cmd.bindPipeline(vk::PipelineBindPoint::eCompute, *upscale_pipeline);
++            cmd.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *upscale_pipeline_layout, 0,
++                                     writes);
++            cmd.pushConstants(*upscale_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0,
++                              sizeof(params), &params);
++            cmd.dispatch((frame.output_width + 7) / 8, (frame.output_height + 7) / 8, 1);
++        }
++        if (profile) {
++            cmd.writeTimestamp2(all, *pool, slice * kQueries + 2);
++            recorded[slice] = true;
++        }
++        current = previous;
++        fresh = false;
++        ++frames;
++        return true;
++    }
++};
++
++GsrUpscaler::GsrUpscaler(const Instance& instance, Scheduler& scheduler)
++    : impl{std::make_unique<Impl>(instance, scheduler)} {}
++
++GsrUpscaler::~GsrUpscaler() = default;
++
++bool GsrUpscaler::Record(const Frame& frame) {
++    return impl->Record(frame);
++}
++
++} // namespace Vulkan
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_gsr2.h b/gpu/shadps4/video_core/renderer_vulkan/vk_gsr2.h
+new file mode 100644
+index 0000000..bbb9310
+--- /dev/null
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_gsr2.h
+@@ -0,0 +1,47 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++// Adapted from ducvd89/Bloodborne-Android (1600cc0).
++// bbport: Qualcomm Snapdragon Game Super Resolution 2 (BSD-3-Clause, gpu/third_party/snapdragon-gsr2)
++// as an alternative to the FSR 3.1 context of TemporalUpscaler: the 2-pass compute variant
++// (convert: depth clip, YCoCg color, motion; upscale: reprojected history plus a Lanczos kernel).
++// It takes the same inputs as the FSR 4 hook: scene color, depth, the port's motion vectors
++// (render pixels, previous - current) and the jitter offset. History and the intermediate images
++// are its own and follow the render and output sizes. BB_GSR2_PROFILE=1 logs GPU ms per pass.
++
++#pragma once
++
++#include <array>
++#include <memory>
++#include "common/types.h"
++#include "video_core/renderer_vulkan/vk_common.h"
++
++namespace Vulkan {
++
++class Instance;
++class Scheduler;
++
++class GsrUpscaler {
++public:
++    GsrUpscaler(const Instance& instance, Scheduler& scheduler);
++    ~GsrUpscaler();
++
++    struct Frame {
++        vk::CommandBuffer cmdbuf;
++        /// Views in General layout: color and depth (depth aspect) sampled, motion (RG16F)
++        /// sampled, output (RGBA16F) written. Color and depth may be larger than the scene.
++        vk::ImageView color, depth, motion, output;
++        u32 render_width, render_height, output_width, output_height;
++        std::array<float, 2> jitter; ///< FSR's convention: pixels, the projection's shift
++        float vertical_fov;          ///< radians
++        bool camera_still, reset;
++    };
++
++    /// Records both passes into `frame.cmdbuf`; the output stays in General. False when the
++    /// pipelines cannot be made.
++    bool Record(const Frame& frame);
++
++private:
++    struct Impl;
++    std::unique_ptr<Impl> impl;
++};
++
++} // namespace Vulkan
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
 index 10565e9..2e52bf8 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
@@ -138,10 +1114,10 @@ index 5325169..85f2c87 100644
      u32 GetGraphicsQueueFamilyIndex() const {
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp
 new file mode 100644
-index 0000000..841e89c
+index 0000000..d3daca0
 --- /dev/null
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp
-@@ -0,0 +1,767 @@
+@@ -0,0 +1,764 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +// Adapted from ducvd89/Bloodborne-Android (1600cc0).
 +// bbport: see vk_lsfg.h.
@@ -365,9 +1341,6 @@ index 0000000..841e89c
 +    config.hdr = 0;
 +    pace = EnvFlag("BB_LSFG_PACE", true);
 +    chain = EnvFlag("BB_LSFG_CHAIN", true);
-+    if (const char* value = std::getenv("BB_LSFG_FRAMES"); value && *value) {
-+        frames_cap = static_cast<u32>(std::clamp(int(std::strtol(value, nullptr, 10)), 0, 8));
-+    }
 +    sync_host = EnvString("BB_LSFG_SYNC") == "host";
 +
 +    const auto start = std::chrono::steady_clock::now();
@@ -911,47 +1884,16 @@ index 0000000..841e89c
 +#endif // __ANDROID__
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.h b/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.h
 new file mode 100644
-index 0000000..61e1484
+index 0000000..4d296c5
 --- /dev/null
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.h
-@@ -0,0 +1,174 @@
+@@ -0,0 +1,136 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +// Adapted from ducvd89/Bloodborne-Android (1600cc0).
-+// bbport: Lossless Scaling frame generation for the Bionic build (BB_LSFG_MULTIPLIER 2-4).
-+//
-+// The frame generation itself is Bloodframe, libbloodframe.so (the ducvd89/bloodframe repository, based on GameNative's lsfg-vk
-+// fork's framegen backend; tools/android/build_bloodframe.sh; its C API header is tools/android/lsfg/bb_lsfg.h), loaded with dlopen the first time frame generation turns on. It
-+// runs on its own VkDevice of the same driver and physical device as the game's and exchanges images
-+// with this device as AHardwareBuffers: this class owns the game's side of that hand-over.
-+//
-+// For every real game frame (Presenter::Present):
-+//  1. the final picture (Frame::image, before the overlay) is blitted into the next of two input
-+//     buffers, in a submission of its own that signals a sync-file semaphore (ProcessFrame);
-+//  2. the library is given that sync file and makes the generated frames (multiplier - 1) into its
-+//     output buffers on the framegen device, signaling a sync file for each (the same call returns
-+//     them) and one for "done with the input buffers";
-+//  3. the presenter blits each output into a swapchain buffer (waiting for its sync file on the GPU)
-+//     and shows the generated frames first, the real frame last, spaced evenly over the real frame
-+//     interval; the "done with the input buffers" file is waited for by the next frame's copy.
-+// Nothing of this waits on the CPU for the GPU (BB_LSFG_CHAIN=0: the old waits for the last cycle's
-+// presents and copy, which made the present thread the bottleneck once the GPU was behind: frames
-+// queued for it, ~200 ms late); see the synchronization objects below.
-+// Buffers are handed between the two devices with ownership transfers to VK_QUEUE_FAMILY_EXTERNAL, as
-+// the fork's layer does. If a sync file cannot be exported or imported, the call waits on the CPU
-+// instead (BB_LSFG_SYNC=host forces that); if anything else fails, frame generation is off from then
-+// on and the game goes on with its own frames.
-+//
-+// Settings: multiplier (2, 3, 4), flow scale (0.25 .. 1.0, default 0.75), performance (1: the light
-+// model, default) and fp16 (1, default: half-precision SPIR-V when Lossless.dll and the GPU have it,
-+// else the full-precision SPIR-V of the dll, the translated DXBC as the last resort) come from bb_lsfg_state.h (the app's live lsfg.state file; the presenter makes a
-+// new Lsfg when they change). Environment: BB_LSFG_DLL (the player's Lossless.dll, else bbport/ or shared
-+// storage), BB_LSFG_FORMAT (rgba16f, default, like the layer; rgba8),
-+// BB_LSFG_SYNC (fd, default; host), BB_LSFG_PACE (1, default: the presenter spaces the frames),
-+// BB_LSFG_STATS (1: real/generated presents per second in the log), BB_LSFG_LIB (path of the library),
-+// BB_LSFG_CHAIN (1, default: GPU-side synchronization; 0: CPU waits), BB_LSFG_FRAMES (1, default: the
-+// most game frames out while it runs, see Presenter::frames_cap; 0: only the pool), BB_LSFG_LATENCY
-+// (1: per-step latency in the log, vk_frame_latency.h). "<state file>.tune" (chain=, pace=, frames=)
-+// overrides those three for every new Lsfg, for comparisons while the game runs.
++// Android Vulkan bridge for Bloodframe. The engine uses a second VkDevice on the same
++// driver and exchanges AHardwareBuffers with the presenter. Sync-file semaphores order
++// writes to the buffers; a host wait is available for drivers with unreliable sync files.
++// The presenter applies engine settings when it starts and falls back on failure.
 +#pragma once
 +
 +#ifdef __ANDROID__
@@ -995,12 +1937,6 @@ index 0000000..61e1484
 +    bool Paced() const {
 +        return pace;
 +    }
-+    /// BB_LSFG_FRAMES (default 1): the most game frames out at once while this runs (taken by the GPU
-+    /// command thread and not yet presented); 0: only the presenter's pool bounds them.
-+    u32 FramesCap() const {
-+        return frames_cap;
-+    }
-+
 +    /// The next real frame: `image` (width x height, general layout) is complete when the timeline
 +    /// semaphore `ready` reaches `ready_tick`. Makes the generated frames and returns how many
 +    /// (0 for the first frames while the temporal history fills, else Multiplier() - 1), or -1 when
@@ -1040,7 +1976,6 @@ index 0000000..61e1484
 +    u32 multiplier = 0;
 +    u32 shared_format = 0; ///< VkFormat of the shared images
 +    bool pace = true;
-+    u32 frames_cap = 1;
 +    const char* shader_set_name = "FP32"; ///< FP16, FP32 or FP32-DXBC (the stats line)
 +    int precision_logged = -1; ///< the shader set LogPrecision last said (-1: nothing yet)
 +    std::string reason_logged;
@@ -1314,6 +2249,133 @@ index 212581e..67cca63 100644
 +    bool bloodframe_initialized = false;
 +#endif
      Scheduler flip_scheduler;
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
+index a11e28c..100c7a4 100644
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.cpp
+@@ -235,3 +235,3 @@ bool TemporalUpscaler::Active() const {
+            (SpartanSettings::Get().upscaler == SpartanSettings::UpscalerFsr3 ||
+-            SpartanSettings::IsFsr4(SpartanSettings::Get().upscaler) ||
++            SpartanSettings::IsFsr4(SpartanSettings::Get().upscaler) || UseGsr2() ||
+             SpartanSettings::Get().upscaler == SpartanSettings::UpscalerTaa) &&
+@@ -242,3 +242,3 @@ bool TemporalUpscaler::ReactiveOn() const {
+     // FSR 4 takes no reactive mask: the opaque snapshot and the mask pass would be wasted.
+-    return !SpartanToggle::Disabled(1u << 27) && !UseFsr4() &&
++    return !SpartanToggle::Disabled(1u << 27) && !UseFsr4() && !UseGsr2() &&
+            SpartanSettings::Get().upscaler != SpartanSettings::UpscalerTaa;
+@@ -521,3 +521,3 @@ void TemporalUpscaler::RunLdr() {
+     const bool stencil_mask =
+-        !UseFsr4() && (RecordStencilReactive(cmdbuf, depth, depth_format, w, h) ||
++        !UseFsr4() && !UseGsr2() && (RecordStencilReactive(cmdbuf, depth, depth_format, w, h) ||
+                        (mask_ready && ReactiveOn()));
+@@ -536,3 +536,6 @@ void TemporalUpscaler::RunLdr() {
+     }
+-    if (UseFsr4()) {
++    if (UseGsr2()) {
++        const auto color_view = CachedView(color, color.info.pixel_format, vk::ImageAspectFlagBits::eColor);
++        if (!RecordGsr2(cmdbuf, color_view, depth_view, w, h, w, h)) return;
++    } else if (UseFsr4()) {
+         if (!RecordFsr4(cmdbuf, {color.GetImage(), {}, w, h}, {depth.GetImage(), depth_view, w, h},
+@@ -648,2 +651,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
+     const bool use_fsr4 = UseFsr4();
++    const bool use_gsr2 = UseGsr2();
+     const bool use_taa = SpartanSettings::Get().upscaler == SpartanSettings::UpscalerTaa;
+@@ -654,3 +658,4 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
+     if (resources_ready && w == width && h == height && ow == out_width && oh == out_height &&
+-        hdr == context_hdr && use_fsr4 == resources_fsr4 && use_taa == resources_taa) {
++        hdr == context_hdr && use_fsr4 == resources_fsr4 && use_taa == resources_taa &&
++        use_gsr2 == resources_gsr2) {
+         return true;
+@@ -661,2 +666,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
+     resources_ready = false;
++    if (!use_gsr2) gsr2.reset();
+     if (context) {
+@@ -693,3 +699,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
+     // FSR 4 has its own model context (vk_fsr4); the images below are shared.
+-    if (!use_fsr4 && !use_taa) {
++    if (!use_fsr4 && !use_taa && !use_gsr2) {
+         if (const u64 issues = ffxVkPortableValidateUpscaleCreateInfo(&create_info)) {
+@@ -794,2 +800,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
+     resources_fsr4 = use_fsr4;
++    resources_gsr2 = use_gsr2;
+     resources_taa = use_taa;
+@@ -804,2 +811,3 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
+     }
++    if (use_gsr2) return true;
+     FfxVkPortableMemoryUsage usage{};
+@@ -1032,3 +1040,3 @@ void TemporalUpscaler::ExtraSharpen(vk::CommandBuffer cmdbuf, vk::Image target,
+     const auto& settings = SpartanSettings::Get();
+-    const float extra = std::clamp(settings.sharpness.load(), 0.0f, 2.0f) - 1.0f;
++    const float extra = std::clamp(settings.sharpness.load(), 0.0f, 2.0f) - (UseGsr2() ? 0.0f : 1.0f);
+     if (!settings.sharpen || extra <= 0.0f) {
+@@ -1391,2 +1399,4 @@ void TemporalUpscaler::Run() {
+         dispatched = true;
++    } else if (UseGsr2()) {
++        dispatched = RecordGsr2(cmdbuf, input_color_view, input_depth_view, w, h, ow, oh);
+     } else if (UseFsr4()) {
+@@ -1958,3 +1968,3 @@ void TemporalUpscaler::RunScaled() {
+     // spartanport: FSR 4 writes its HDR-format output, copied into the output-size UI image.
+-    if (UseFsr4() || SpartanSettings::Get().upscaler == SpartanSettings::UpscalerTaa) {
++    if (UseFsr4() || UseGsr2() || SpartanSettings::Get().upscaler == SpartanSettings::UpscalerTaa) {
+         const auto [fw, fh] = std::array{ow, oh};
+@@ -1966,2 +1976,4 @@ void TemporalUpscaler::RunScaled() {
+             RecordTaa(cmdbuf, color_view, depth_view);
++        } else if (UseGsr2()) {
++            ok4 = RecordGsr2(cmdbuf, color_view, depth_view, w, h, ow, oh);
+         } else {
+@@ -2353,2 +2365,33 @@ namespace Vulkan {
+
++bool TemporalUpscaler::UseGsr2() const {
++    return SpartanSettings::Get().upscaler == SpartanSettings::UpscalerGsr2;
++}
++
++bool TemporalUpscaler::RecordGsr2(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth,
++                                  u32 w, u32 h, u32 ow, u32 oh) {
++    if (!gsr2) gsr2 = std::make_unique<GsrUpscaler>(instance, scheduler);
++    const float sign = SpartanToggle::Disabled(1u << 26) ? -1.0f : 1.0f;
++    const bool ok = gsr2->Record({
++        .cmdbuf = cmdbuf,
++        .color = color,
++        .depth = depth,
++        .motion = *motion_view,
++        .output = *output_view,
++        .render_width = w,
++        .render_height = h,
++        .output_width = ow,
++        .output_height = oh,
++        .jitter = {sign * jitter[0], sign * jitter[1]},
++        .vertical_fov = camera_motion.VerticalFov(),
++        .camera_still = false,
++        .reset = reset,
++    });
++    if (!ok) {
++        std::printf("Upscaler: GSR 2 failed; falling back to FSR 3.1\n");
++        SpartanSettings::Get().upscaler = SpartanSettings::UpscalerFsr3;
++        reset = true;
++    }
++    return ok;
++}
++
+ bool TemporalUpscaler::UseFsr4() const {
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h
+index 495d892..6595165 100644
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_temporal_upscaler.h
+@@ -25,2 +25,3 @@
+ #include "video_core/renderer_vulkan/vk_fsr4.h"
++#include "video_core/renderer_vulkan/vk_gsr2.h"
+ #include "video_core/texture_cache/image.h"
+@@ -186,2 +187,5 @@ private:
+     /// Records FSR 4 into output_image; on a permanent failure FSR 3 takes over.
++    bool UseGsr2() const;
++    bool RecordGsr2(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth,
++                    u32 w, u32 h, u32 ow, u32 oh);
+     bool RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image color, Fsr4Upscaler::Image depth,
+@@ -279,2 +283,4 @@ private:
+     std::unique_ptr<Fsr4Upscaler> fsr4;
++    std::unique_ptr<GsrUpscaler> gsr2;
++    bool resources_gsr2 = false;
+     std::unique_ptr<FrameGeneration> frame_generation;
 diff --git a/gpu/shim/android_vulkan.h b/gpu/shim/android_vulkan.h
 new file mode 100644
 index 0000000..1b69ef2
@@ -1521,8 +2583,16 @@ index 27452be..f83048e 100644
 -enum class WindowSystemType : u8 { Headless, Windows, X11, Wayland, Metal };
 +enum class WindowSystemType : u8 { Headless, Windows, X11, Wayland, Metal, Android };
 
+diff --git a/gpu/shim/spartanport_overlay.cpp b/gpu/shim/spartanport_overlay.cpp
+index 7bee6cd..92ef0dd 100644
+--- a/gpu/shim/spartanport_overlay.cpp
++++ b/gpu/shim/spartanport_overlay.cpp
+@@ -377,2 +377,3 @@ const char* UpscalerLabel(int upscaler) {
+     case SpartanSettings::UpscalerTaa: return "TAA";
++    case SpartanSettings::UpscalerGsr2: return "GSR 2";
+     default: return "";
 diff --git a/gpu/shim/spartanport_settings.cpp b/gpu/shim/spartanport_settings.cpp
-index 8a8c68c..abffeba 100644
+index 8a8c68c..2fb8ded 100644
 --- a/gpu/shim/spartanport_settings.cpp
 +++ b/gpu/shim/spartanport_settings.cpp
 @@ -286,2 +286,5 @@ void Load() {
@@ -1531,6 +2601,20 @@ index 8a8c68c..abffeba 100644
 +        {"PISTON_SHARPEN", "sharpen"}, {"PISTON_TEXTURE_QUALITY", "texture_quality"},
 +        {"PISTON_BLOOM", "bloom"}, {"PISTON_SHADOWS", "shadows"},
          {"SPARTAN_GLYPH_STYLE", "glyph_style"},     {"SPARTAN_AUTO_SAFE_FPS", "auto_safe_fps"},
+@@ -541,3 +544,3 @@ const char* PresetName(int preset) {
+ const char* UpscalerName(int upscaler) {
+-    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa"};
++    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa", "gsr2"};
+     return names[std::clamp(upscaler, 0, UpscalerCount - 1)];
+diff --git a/gpu/shim/spartanport_settings.h b/gpu/shim/spartanport_settings.h
+index b21c20e..1ed5c8d 100644
+--- a/gpu/shim/spartanport_settings.h
++++ b/gpu/shim/spartanport_settings.h
+@@ -34,3 +34,3 @@ inline constexpr int MasterVolumeMin = 0, MasterVolumeMax = 200, MasterVolumeDef
+ enum Upscaler : int { UpscalerOff = 0, UpscalerFsr3 = 1, UpscalerFsr4 = 2, UpscalerFsr411 = 3,
+-                      UpscalerTaa = 4, UpscalerCount };
++                      UpscalerTaa = 4, UpscalerGsr2 = 5, UpscalerCount };
+ /// FSR 4 v07 or FSR 4.1.1: the same inputs, settings and placement in the frame.
 diff --git a/gpu/shim/window.cpp b/gpu/shim/window.cpp
 index a40c4f2..ea5e1b6 100644
 --- a/gpu/shim/window.cpp

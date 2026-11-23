@@ -58,6 +58,7 @@ class GameActivity : SDLActivity() {
             performance = PerformanceHud(this, when (intent.getIntExtra("upscaler", 0)) {
                 1 -> "FSR 3.1"
                 2 -> "TAA"
+                3 -> "GSR 2"
                 else -> ""
             }).also {
                 addContentView(it, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.RIGHT)
@@ -77,6 +78,7 @@ class GameActivity : SDLActivity() {
         val upscaler = when (number("upscaler", 0)) {
             1 -> "fsr3"
             2 -> "taa"
+            3 -> "gsr2"
             else -> "off"
         }
         val generation = number("framegen", 0).coerceIn(0, 4)
