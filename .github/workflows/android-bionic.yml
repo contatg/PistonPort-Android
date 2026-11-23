@@ -21,6 +21,7 @@ jobs:
       SPARTAN_REF: 56e804d1ef3e108257b94c51b6f7fb204930a244
       NDK_VERSION: 29.0.14206865
       ANDROID_API: 33
+      ADRENOTOOLS_REF: 8fae8ce254dfc1344527e05301e43f37dea2df80
       BIONIC_DEPS_REF: 046791de0fd4639b0b479afe8fc7ec67e538925d
     steps:
       - uses: actions/checkout@v4
@@ -125,6 +126,12 @@ jobs:
           prefix="$RUNNER_TEMP/bionic-deps/.local-deps/android/bionic-prefix"
           ndk="$ANDROID_HOME/ndk/$NDK_VERSION"
           git -C "$src" apply "$GITHUB_WORKSPACE/pistonport/native-android/spartanport-renderer.patch"
+          drivers="$RUNNER_TEMP/adrenotools"
+          git init "$drivers"
+          git -C "$drivers" remote add origin https://github.com/bylaws/libadrenotools.git
+          git -C "$drivers" fetch --depth 1 origin "$ADRENOTOOLS_REF"
+          git -C "$drivers" checkout --detach FETCH_HEAD
+          git -C "$drivers" submodule update --init --recursive --depth 1
           for patch in "$src"/gpu/patches/fsr-vulkan/*.patch; do
             git -C "$src/gpu/third_party/fsr-vulkan" apply "$patch"
           done
@@ -151,6 +158,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="$prefix" -DCMAKE_FIND_ROOT_PATH="$prefix" \
             -DBoost_DIR="$prefix/lib/cmake/Boost" -Dtsl-robin-map_DIR="$prefix/lib/cmake/tsl-robin-map" \
             -DVMA_INCLUDE_DIR="$prefix/include" \
+            -DPISTON_ADRENOTOOLS="$drivers" \
             -DSPARTAN_ANDROID_CPU="$RUNNER_TEMP/bionic-cpu/libgportcpu.so"
           cmake --build "$RUNNER_TEMP/bionic-game" --target pistonport --parallel 4 -- -k 0
 
@@ -170,10 +178,11 @@ jobs:
           "$llvm/bin/llvm-strip" -o "$staging/libpistonport.so" "$RUNNER_TEMP/bionic-game/libpistonport.so"
           "$llvm/bin/llvm-strip" -o "$staging/libgportcpu.so" "$RUNNER_TEMP/bionic-cpu/libgportcpu.so"
           cp "$prefix/lib/libSDL3.so" "$staging/"
+          cp "$RUNNER_TEMP/bionic-game/adrenotools/src/hook/"{libmain_hook,libhook_impl}.so "$staging/"
           cp "$llvm/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" "$staging/"
           "$llvm/bin/llvm-readelf" --dyn-syms --wide "$staging/libpistonport.so" > "$RUNNER_TEMP/piston-symbols"
           grep -E 'GLOBAL.*DEFAULT +[0-9]+ SDL_main$' "$RUNNER_TEMP/piston-symbols"
-          grep -E 'vkCreateInstance$' "$RUNNER_TEMP/piston-symbols"
+          grep -E 'GLOBAL.*DEFAULT +[0-9]+ piston_android_vulkan_loader$' "$RUNNER_TEMP/piston-symbols"
           for library in "$staging"/*.so; do
             "$llvm/bin/llvm-readelf" -h "$library" | grep -E 'Machine: +AArch64'
             "$llvm/bin/llvm-readelf" -d "$library" > "$RUNNER_TEMP/elf-deps"
@@ -240,16 +249,16 @@ jobs:
 
           with ZipFile(sys.argv[1]) as apk:
               files = set(apk.namelist())
-              expected = {"libpistonport.so", "libgportcpu.so", "libSDL3.so", "libc++_shared.so"}
+              expected = {"libpistonport.so", "libgportcpu.so", "libSDL3.so", "libc++_shared.so", "libmain_hook.so", "libhook_impl.so"}
               assert {f"lib/arm64-v8a/{name}" for name in expected} <= files
               assert {"AndroidManifest.xml", "classes.dex", "assets/image.json", "assets/cars3-runtime.elf"} <= files
               assert all(not name.startswith("assets/rootfs") for name in files)
           PYTHON
-          install -Dm644 "$apk" "$RUNNER_TEMP/piston-apk/PistonPort-Android-Native-arm64.apk"
+          install -Dm644 "$apk" "$RUNNER_TEMP/piston-apk/PistonPort-Android-Turnip-arm64.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: PistonPort-Android-Native-APK
-          path: ${{ runner.temp }}/piston-apk/PistonPort-Android-Native-arm64.apk
+          name: PistonPort-Android-Turnip-APK
+          path: ${{ runner.temp }}/piston-apk/PistonPort-Android-Turnip-arm64.apk
           if-no-files-found: error
           compression-level: 0

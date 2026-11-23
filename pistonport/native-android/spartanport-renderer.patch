@@ -1,5 +1,5 @@
 diff --git a/gpu/CMakeLists.txt b/gpu/CMakeLists.txt
-index e933214..7076df6 100644
+index e933214..2484e60 100644
 --- a/gpu/CMakeLists.txt
 +++ b/gpu/CMakeLists.txt
 @@ -59,2 +59,5 @@ endif()
@@ -23,20 +23,22 @@ index e933214..7076df6 100644
 -else()
 +elseif (NOT ANDROID)
      target_link_libraries(spartanportgpu PUBLIC PkgConfig::X11)
-@@ -213,2 +216,17 @@ endif()
+@@ -213,2 +216,19 @@ endif()
 
 +if (ANDROID)
++    add_subdirectory("${PISTON_ADRENOTOOLS}" adrenotools EXCLUDE_FROM_ALL)
 +    file(GLOB SPARTAN_RUNTIME CONFIGURE_DEPENDS ../src/runtime*.c)
 +    file(GLOB SPARTAN_ATRAC9 CONFIGURE_DEPENDS ../third_party/LibAtrac9/C/src/*.c)
 +    add_library(atrac9 STATIC ${SPARTAN_ATRAC9})
 +    set_target_properties(atrac9 PROPERTIES C_STANDARD 99)
-+    add_library(pistonport SHARED ../src/probe.c ${SPARTAN_RUNTIME} ../src/vulkan_smoke.c)
++    add_library(pistonport SHARED ../src/probe.c ${SPARTAN_RUNTIME} ../src/android_vulkan.c)
++    add_dependencies(pistonport main_hook)
 +    set_target_properties(pistonport PROPERTIES C_STANDARD 11)
 +    target_include_directories(pistonport PRIVATE .. ../src)
 +    # FFmpeg's ARM64 assembly uses direct references to its own transform tables.
 +    # Symbols from static archives stay private to libpistonport.so.
 +    target_link_options(pistonport PRIVATE "LINKER:--exclude-libs,ALL")
-+    target_link_libraries(pistonport PRIVATE spartanportgpu atrac9 "${SPARTAN_ANDROID_CPU}"
++    target_link_libraries(pistonport PRIVATE spartanportgpu atrac9 adrenotools "${SPARTAN_ANDROID_CPU}"
 +        android dl log m Vulkan::Vulkan z)
 +endif()
 +
@@ -91,8 +93,26 @@ index 7f4f512..48e403b 100644
 -#ifdef __linux__
 +#if defined(__linux__) && !defined(__ANDROID__)
      if (std::getenv("SPARTAN_UFFD") && std::getenv("SPARTAN_UFFD")[0] == '1') {
+diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
+index 10565e9..3877bdb 100644
+--- a/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
++++ b/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
+@@ -9,2 +9,5 @@
+
++#ifdef __ANDROID__
++#include "android_vulkan.h"
++#endif
+ #include "common/assert.h"
+@@ -183,2 +186,7 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
+
++#ifdef __ANDROID__
++    ASSERT_MSG(piston_android_vulkan_device(static_cast<VkInstance>(*instance),
++                                           static_cast<VkPhysicalDevice>(physical_device)) == 0,
++               "The active Android GPU driver does not meet the Vulkan requirements");
++#endif
+     available_extensions = GetSupportedExtensions(physical_device);
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp
-index 472be23..99092c1 100644
+index 472be23..a78e076 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_platform.cpp
 @@ -4,4 +4,4 @@
@@ -102,7 +122,13 @@ index 472be23..99092c1 100644
 +#if defined(__ANDROID__)
 +// The build enables VK_USE_PLATFORM_ANDROID_KHR across the renderer.
  #elif defined(_WIN64)
-@@ -65,3 +65,12 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
+@@ -18,2 +18,5 @@
+
++#ifdef __ANDROID__
++#include "android_vulkan.h"
++#endif
+ #include "common/assert.h"
+@@ -65,3 +68,12 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
 
 -#if defined(VK_USE_PLATFORM_WIN32_KHR)
 +#if defined(VK_USE_PLATFORM_ANDROID_KHR)
@@ -116,7 +142,7 @@ index 472be23..99092c1 100644
 +    }
 +#elif defined(VK_USE_PLATFORM_WIN32_KHR)
      if (window_info.type == Frontend::WindowSystemType::Windows) {
-@@ -173,3 +182,7 @@ std::vector<const char*> GetInstanceExtensions(Frontend::WindowSystemType window
+@@ -173,3 +185,7 @@ std::vector<const char*> GetInstanceExtensions(Frontend::WindowSystemType window
          break;
 -#if defined(VK_USE_PLATFORM_WIN32_KHR)
 +#if defined(VK_USE_PLATFORM_ANDROID_KHR)
@@ -125,6 +151,40 @@ index 472be23..99092c1 100644
 +        break;
 +#elif defined(VK_USE_PLATFORM_WIN32_KHR)
      case Frontend::WindowSystemType::Windows:
+@@ -272,2 +288,7 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
+
++#ifdef __ANDROID__
++    const auto get_proc = piston_android_vulkan_loader();
++    ASSERT_MSG(get_proc, "Failed to load the selected Vulkan driver");
++    VULKAN_HPP_DEFAULT_DISPATCHER.init(get_proc);
++#else
+     static vk::detail::DynamicLoader dl;
+@@ -275,2 +296,3 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
+         dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
++#endif
+
+diff --git a/gpu/shim/android_vulkan.h b/gpu/shim/android_vulkan.h
+new file mode 100644
+index 0000000..1b69ef2
+--- /dev/null
++++ b/gpu/shim/android_vulkan.h
+@@ -0,0 +1,16 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++#pragma once
++
++#include <vulkan/vulkan.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++PFN_vkGetInstanceProcAddr piston_android_vulkan_loader(void);
++int piston_android_vulkan_device(VkInstance instance, VkPhysicalDevice device);
++int piston_android_vulkan_test(void);
++
++#ifdef __cplusplus
++}
++#endif
 diff --git a/gpu/shim/sdl_window.h b/gpu/shim/sdl_window.h
 index 27452be..f83048e 100644
 --- a/gpu/shim/sdl_window.h
@@ -153,28 +213,185 @@ index a40c4f2..ea5e1b6 100644
 +        ASSERT_MSG(window_info.render_surface, "SDL did not provide an Android native window");
 +    } else
  #endif
+diff --git a/src/android_vulkan.c b/src/android_vulkan.c
+new file mode 100644
+index 0000000..c86ba9d
+--- /dev/null
++++ b/src/android_vulkan.c
+@@ -0,0 +1,144 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++#include "gpu/shim/android_vulkan.h"
++
++#include <adrenotools/driver.h>
++#include <dlfcn.h>
++#include <pthread.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++static pthread_once_t loader_once = PTHREAD_ONCE_INIT;
++static PFN_vkGetInstanceProcAddr loader;
++
++static void init_loader(void) {
++    const char *directory = getenv("PISTON_TURNIP_DIR");
++    void *handle;
++    if (directory && directory[0]) {
++        const char *hooks = getenv("PISTON_DRIVER_HOOKS");
++        handle = hooks ? adrenotools_open_libvulkan(RTLD_NOW, ADRENOTOOLS_DRIVER_CUSTOM,
++            NULL, hooks, directory, "libpiston_turnip.so", NULL, NULL) : NULL;
++        if (!handle) {
++            fputs("Falha ao carregar o Turnip selecionado. Use um driver ARM64 para Android.\n", stderr);
++            return;
++        }
++    } else {
++        handle = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
++        if (!handle) {
++            fprintf(stderr, "Vulkan do sistema indisponível: %s\n", dlerror());
++            return;
++        }
++    }
++    loader = (PFN_vkGetInstanceProcAddr)dlsym(handle, "vkGetInstanceProcAddr");
++    if (!loader) fputs("O driver não fornece vkGetInstanceProcAddr.\n", stderr);
++}
++
++PFN_vkGetInstanceProcAddr piston_android_vulkan_loader(void) {
++    pthread_once(&loader_once, init_loader);
++    return loader;
++}
++
++int piston_android_vulkan_device(VkInstance instance, VkPhysicalDevice device) {
++    PFN_vkGetInstanceProcAddr get = piston_android_vulkan_loader();
++    PFN_vkGetPhysicalDeviceProperties props_fn =
++        (PFN_vkGetPhysicalDeviceProperties)get(instance, "vkGetPhysicalDeviceProperties");
++    if (!props_fn) return 1;
++    VkPhysicalDeviceProperties props;
++    props_fn(device, &props);
++    printf("GPU: %s | Vulkan %u.%u.%u\n", props.deviceName,
++           VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
++           VK_API_VERSION_PATCH(props.apiVersion));
++    if (props.apiVersion < VK_API_VERSION_1_3) {
++        fputs("O jogo exige Vulkan 1.3 no dispositivo. Selecione um Turnip compatível.\n", stderr);
++        return 1;
++    }
++
++    PFN_vkGetPhysicalDeviceProperties2 props2_fn =
++        (PFN_vkGetPhysicalDeviceProperties2)get(instance, "vkGetPhysicalDeviceProperties2");
++    if (!props2_fn) return 1;
++    VkPhysicalDeviceDriverProperties driver = {
++        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES,
++    };
++    VkPhysicalDeviceProperties2 queried = {
++        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
++        .pNext = &driver,
++    };
++    props2_fn(device, &queried);
++    printf("Driver: %s (%s)\n", driver.driverName, driver.driverInfo);
++    if (getenv("PISTON_TURNIP_DIR") && driver.driverID != VK_DRIVER_ID_MESA_TURNIP) {
++        fputs("O driver ativo não é Mesa Turnip. O driver selecionado não pôde ser ativado.\n", stderr);
++        return 1;
++    }
++    return 0;
++}
++
++static int check_extensions(PFN_vkGetInstanceProcAddr get, VkInstance instance, VkPhysicalDevice device) {
++    PFN_vkEnumerateDeviceExtensionProperties enumerate =
++        (PFN_vkEnumerateDeviceExtensionProperties)get(instance, "vkEnumerateDeviceExtensionProperties");
++    uint32_t count = 0;
++    if (!enumerate || enumerate(device, NULL, &count, NULL) != VK_SUCCESS || !count) return 1;
++    VkExtensionProperties *extensions = calloc(count, sizeof(*extensions));
++    if (!extensions) return 1;
++    int failed = enumerate(device, NULL, &count, extensions) != VK_SUCCESS;
++    if (!failed) {
++        const char *const required[] = {
++            VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
++            VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
++        };
++        for (size_t i = 0; i < sizeof(required) / sizeof(required[0]); ++i) {
++            uint32_t j = 0;
++            while (j < count && strcmp(extensions[j].extensionName, required[i])) ++j;
++            if (j == count) {
++                fprintf(stderr, "Extensão exigida ausente: %s\n", required[i]);
++                failed = 1;
++            }
++        }
++    }
++    free(extensions);
++    return failed;
++}
++
++int piston_android_vulkan_test(void) {
++    PFN_vkGetInstanceProcAddr get = piston_android_vulkan_loader();
++    if (!get) return 1;
++    PFN_vkEnumerateInstanceVersion version =
++        (PFN_vkEnumerateInstanceVersion)get(VK_NULL_HANDLE, "vkEnumerateInstanceVersion");
++    uint32_t api = VK_API_VERSION_1_0;
++    if (version && version(&api) != VK_SUCCESS) return 1;
++    if (api < VK_API_VERSION_1_3) {
++        fprintf(stderr, "O carregador oferece Vulkan %u.%u. O jogo exige Vulkan 1.3.\n",
++            VK_API_VERSION_MAJOR(api), VK_API_VERSION_MINOR(api));
++        return 1;
++    }
++    PFN_vkCreateInstance create = (PFN_vkCreateInstance)get(VK_NULL_HANDLE, "vkCreateInstance");
++    const VkApplicationInfo app = {
++        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
++        .pApplicationName = "PistonPort", .apiVersion = VK_API_VERSION_1_3,
++    };
++    const VkInstanceCreateInfo info = {
++        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &app,
++    };
++    VkInstance instance;
++    if (!create || create(&info, NULL, &instance) != VK_SUCCESS) {
++        fputs("Falha ao criar uma instância Vulkan 1.3.\n", stderr);
++        return 1;
++    }
++    PFN_vkDestroyInstance destroy = (PFN_vkDestroyInstance)get(instance, "vkDestroyInstance");
++    PFN_vkEnumeratePhysicalDevices enumerate =
++        (PFN_vkEnumeratePhysicalDevices)get(instance, "vkEnumeratePhysicalDevices");
++    uint32_t count = 0;
++    int passed = 0;
++    if (enumerate && enumerate(instance, &count, NULL) == VK_SUCCESS && count) {
++        VkPhysicalDevice *devices = calloc(count, sizeof(*devices));
++        if (devices && enumerate(instance, &count, devices) == VK_SUCCESS) {
++            for (uint32_t i = 0; i < count && !passed; ++i)
++                passed = !piston_android_vulkan_device(instance, devices[i]) &&
++                         !check_extensions(get, instance, devices[i]);
++        }
++        free(devices);
++    }
++    if (destroy) destroy(instance, NULL);
++    puts(passed ? "Vulkan 1.3 e extensões exigidas: OK." :
++                  "Nenhum dispositivo Vulkan compatível foi encontrado.");
++    return !passed;
++}
 diff --git a/src/probe.c b/src/probe.c
-index 5daee3d..6cefa98 100644
+index 5daee3d..a253a57 100644
 --- a/src/probe.c
 +++ b/src/probe.c
-@@ -25,2 +25,5 @@
+@@ -25,2 +25,6 @@
  #include "gpu/spartanportgpu.h"
 +#ifdef __ANDROID__
 +#include <SDL3/SDL_main.h>
++#include "gpu/shim/android_vulkan.h"
 +#endif
  #if !defined(__GNUC__)
-@@ -1273,2 +1276,6 @@ void runtime_restart(void) {
+@@ -54,3 +58,5 @@ static int entered_game;
+ static int gpu_enabled;
++#ifndef __ANDROID__
+ int vulkan_smoke(void);
++#endif
+
+@@ -1273,2 +1279,6 @@ void runtime_restart(void) {
      TerminateProcess(GetCurrentProcess(),0);
 +#else
 +#ifdef __ANDROID__
 +    // SDLActivity owns the hardware surface. Return to the launcher to start a new game process.
 +    _exit(0);
  #else
-@@ -1280,2 +1287,3 @@ void runtime_restart(void) {
+@@ -1280,2 +1290,3 @@ void runtime_restart(void) {
  #endif
 +#endif
  }
-@@ -1283,2 +1291,13 @@ void runtime_restart(void) {
+@@ -1283,2 +1294,13 @@ void runtime_restart(void) {
  int main(int argc, char **argv) {
 +#ifdef __ANDROID__
 +    const char *log_path = getenv("PISTON_LOG_FILE");
@@ -188,7 +405,7 @@ index 5daee3d..6cefa98 100644
 +    }
 +#endif
      setvbuf(stdout, NULL, _IONBF, 0);
-@@ -1293,4 +1312,8 @@ int main(int argc, char **argv) {
+@@ -1293,4 +1315,8 @@ int main(int argc, char **argv) {
         non-PIE brk heap, i.e. below 1 TiB: the guest packs pointers into 40 bits. */
 +#ifdef __ANDROID__
 +    mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, M_HEAP_TAGGING_LEVEL_NONE);
@@ -197,3 +414,14 @@ index 5daee3d..6cefa98 100644
      mallopt(M_MMAP_THRESHOLD,32*1024*1024);
 +#endif
      /* The guest CPU allocates the memory the guest may hold pointers to through this (below
+@@ -1299,3 +1325,9 @@ int main(int argc, char **argv) {
+ #endif
+-    if (argc == 2 && !strcmp(argv[1], "--vulkan-only")) return vulkan_smoke();
++    if (argc == 2 && !strcmp(argv[1], "--vulkan-only")) {
++#ifdef __ANDROID__
++        return piston_android_vulkan_test();
++#else
++        return vulkan_smoke();
++#endif
++    }
+ #ifdef _WIN32

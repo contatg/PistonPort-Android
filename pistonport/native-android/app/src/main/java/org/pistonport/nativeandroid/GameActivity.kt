@@ -36,6 +36,13 @@ class GameActivity : SDLActivity() {
         Os.setenv("SPARTAN_GPU_USER_DIR", profile.path, true)
         Os.setenv("SPARTAN_FPS_LIMIT", "30", true)
         Os.setenv("SPARTAN_FULLSCREEN", "1", true)
+        if (intent.getBooleanExtra("turnip", false)) {
+            Os.setenv("PISTON_TURNIP_DIR", TurnipDriver.directory(this).path + "/", true)
+            Os.setenv("PISTON_DRIVER_HOOKS", applicationInfo.nativeLibraryDir + "/", true)
+        } else {
+            Os.unsetenv("PISTON_TURNIP_DIR")
+            Os.unsetenv("PISTON_DRIVER_HOOKS")
+        }
         Os.setenv("SPARTAN_ANISOTROPY", "0", true)
         super.onCreate(state)
         if (!mBrokenLibraries && intent.hasExtra("image")) {

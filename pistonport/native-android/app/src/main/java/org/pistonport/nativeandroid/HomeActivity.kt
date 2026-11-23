@@ -21,6 +21,11 @@ class HomeActivity : Activity() {
     private lateinit var diagnostics: TextView
     private lateinit var play: Button
     private lateinit var select: Button
+    private lateinit var driverStatus: TextView
+    private lateinit var importDriver: Button
+    private lateinit var toggleDriver: Button
+    private lateinit var testVulkan: Button
+    private var importingDriver = false
     private var selecting = false
     private var preparing = false
 
@@ -61,8 +66,7 @@ class HomeActivity : Activity() {
                         preparing = false
                         refresh()
                         image.onSuccess { path ->
-                            startActivity(Intent(this@HomeActivity, GameActivity::class.java)
-                                .putExtra("folder", folder.path).putExtra("image", path))
+                            startActivity(gameIntent().putExtra("folder", folder.path).putExtra("image", path))
                         }.onFailure { error ->
                             status.text = error.message ?: "Falha ao preparar a imagem do jogo."
                         }
@@ -71,12 +75,30 @@ class HomeActivity : Activity() {
             }
         }
         column.addView(play)
-        column.addView(Button(this).apply {
-            text = "Testar Vulkan"
+        driverStatus = TextView(this)
+        column.addView(driverStatus)
+        importDriver = Button(this).apply {
+            text = "Selecionar Turnip (ZIP ou .so)"
             setOnClickListener {
-                if (!preparing) startActivity(Intent(this@HomeActivity, GameActivity::class.java))
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                }, PICK_TURNIP)
             }
-        })
+        }
+        column.addView(importDriver)
+        toggleDriver = Button(this).apply {
+            setOnClickListener {
+                TurnipDriver.select(this@HomeActivity, !TurnipDriver.enabled(this@HomeActivity))
+                refresh()
+            }
+        }
+        column.addView(toggleDriver)
+        testVulkan = Button(this).apply {
+            text = "Testar Vulkan 1.3"
+            setOnClickListener { startActivity(gameIntent()) }
+        }
+        column.addView(testVulkan)
         diagnostics = TextView(this).apply { setTextIsSelectable(true) }
         column.addView(diagnostics)
         setContentView(ScrollView(this).apply { addView(column) })
@@ -89,8 +111,20 @@ class HomeActivity : Activity() {
 
     private fun refresh() {
         val folder = PistonSource.current(filesDir)
-        select.isEnabled = !selecting && !preparing
-        play.isEnabled = !selecting && !preparing && folder != null
+        val idle = !selecting && !preparing && !importingDriver
+        val turnip = TurnipDriver.enabled(this)
+        select.isEnabled = idle
+        play.isEnabled = idle && folder != null
+        importDriver.isEnabled = idle
+        testVulkan.isEnabled = idle
+        toggleDriver.isEnabled = idle
+        toggleDriver.visibility = if (TurnipDriver.installed(this)) View.VISIBLE else View.GONE
+        toggleDriver.text = if (turnip) "Usar driver do sistema" else "Ativar Turnip instalado"
+        driverStatus.text = when {
+            importingDriver -> "Instalando o driver…"
+            turnip -> "Driver selecionado: Mesa Turnip"
+            else -> "Driver selecionado: Vulkan do sistema"
+        }
         status.text = when {
             preparing -> "Preparando a inicialização do jogo…"
             selecting -> "Verificando a pasta do jogo…"
@@ -107,6 +141,9 @@ class HomeActivity : Activity() {
         diagnostics.visibility = if (diagnostics.text.isEmpty()) View.GONE else View.VISIBLE
     }
 
+    private fun gameIntent() = Intent(this, GameActivity::class.java)
+        .putExtra("turnip", TurnipDriver.enabled(this))
+
     private fun openPicker() = startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_FOLDER)
 
     override fun onRequestPermissionsResult(code: Int, permissions: Array<String>, results: IntArray) {
@@ -120,7 +157,22 @@ class HomeActivity : Activity() {
     override fun onActivityResult(code: Int, result: Int, data: Intent?) {
         super.onActivityResult(code, result, data)
         val uri = data?.data ?: return
-        if (code != PICK_FOLDER || result != RESULT_OK || selecting) return
+        if (result != RESULT_OK || selecting || preparing || importingDriver) return
+        if (code == PICK_TURNIP) {
+            importingDriver = true
+            refresh()
+            Thread {
+                val installed = runCatching { TurnipDriver.install(applicationContext, uri) }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    importingDriver = false
+                    refresh()
+                    installed.exceptionOrNull()?.let { driverStatus.text = it.message ?: "Falha ao instalar o Turnip." }
+                }
+            }.start()
+            return
+        }
+        if (code != PICK_FOLDER) return
         selecting = true
         refresh()
         Thread {
@@ -137,6 +189,7 @@ class HomeActivity : Activity() {
     private companion object {
         const val STORAGE = 1
         const val PICK_FOLDER = 2
+        const val PICK_TURNIP = 3
     }
 }
 
