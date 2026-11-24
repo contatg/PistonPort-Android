@@ -45,7 +45,6 @@ class HomeActivity : Activity() {
     private lateinit var settingsGpu: TextView
     private var gpuInfo: GpuInfo? = null
     private val catalogs = mutableMapOf<DriverCatalog.Source, List<DriverCatalog.Entry>>()
-    private var hardwareNoticeShown = false
     private var resumed = false
     private val installingDriver get() = DriverInstall.status?.running == true
     private var hubUpdate: (() -> Unit)? = null
@@ -60,7 +59,6 @@ class HomeActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         settings = PortSettings(this)
-        hardwareNoticeShown = state?.getBoolean("hardware_notice_shown") == true
         lastHubSource = DriverCatalog.Source.entries.firstOrNull { it.name == state?.getString("hub_source") }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -97,7 +95,6 @@ class HomeActivity : Activity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putBoolean("hardware_notice_shown", hardwareNoticeShown)
         outState.putString("hub_source", lastHubSource?.name)
         outState.putBoolean("settings_page", settingsPage.visibility == View.VISIBLE)
         outState.putBoolean("controls_page", controlsPanel.visibility == View.VISIBLE)
@@ -247,14 +244,14 @@ class HomeActivity : Activity() {
         driver.addView(settingsGpu)
         driverStatus = PortStyle.text(this@HomeActivity, "", 14f, PortStyle.muted)
         driver.addView(driverStatus)
-        importDriver = button("Importar Turnip (ZIP, ADPKG ou .so)") {
+        importDriver = button("Importar driver") {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "*/*"
-            }, PICK_TURNIP)
+            }, PICK_DRIVER)
         }
         append(driver, importDriver)
-        openHub = button("Abrir Hub de drivers", primary = true) { showDriverHub() }
+        openHub = button("Abrir Hub de drivers", primary = true) { showDriverHub(lastHubSource) }
         append(driver, openHub)
         append(this, driver)
         diagnostics = PortStyle.text(this@HomeActivity, "", 12f, PortStyle.muted).apply {
@@ -488,13 +485,27 @@ class HomeActivity : Activity() {
 
     private fun showHardwareNotice() {
         val info = gpuInfo ?: return
-        if (hardwareNoticeShown || !resumed || isFinishing || isDestroyed) return
-        hardwareNoticeShown = true
+        if (settings.hardwareNoticeShown || !resumed || isFinishing || isDestroyed) return
+        val sources = DriverCatalog.sourcesFor(info)
         val content = card(if (info.stockReady) "Vulkan disponível" else "Compatibilidade Vulkan")
-        content.addView(PortStyle.text(this, info.label, 15f, PortStyle.muted))
+        val kind = info.driverKind
+        val suggestPanvk = kind == DriverKind.PANVK && VulkanDriver.selected(this, kind) == null
+        val message = if (suggestPanvk && info.stockReady && sources.isNotEmpty())
+            "${info.label}\nSe quiser experimentar o PanVK, escolha um pacote para sua Mali no Hub."
+        else info.label
+        content.addView(PortStyle.text(this, message, 15f, PortStyle.muted))
         val dialog = panelDialog(content)
-        append(content, button("Entendi", primary = true) { dialog.dismiss() })
+        if (kind != null && sources.isNotEmpty() && (suggestPanvk || !info.stockReady)) {
+            append(content, button("Abrir Hub ${kind.label}", primary = true) {
+                dialog.dismiss()
+                showDriverHub(sources.first())
+            })
+        }
+        append(content, button("Entendi", primary = sources.isEmpty() || info.stockReady && !suggestPanvk) {
+            dialog.dismiss()
+        })
         dialog.show()
+        settings.hardwareNoticeShown = true
     }
 
     private fun panelDialog(content: View): AlertDialog =
@@ -505,15 +516,19 @@ class HomeActivity : Activity() {
     private fun refresh() {
         val folder = PistonSource.current(filesDir)
         val idle = !selecting && !preparing && !installingDriver && !frameAssetBusy
-        val selectedDriver = TurnipDriver.selected(this)
-        val installed = TurnipDriver.list(this)
+        val kind = gpuInfo?.driverKind
+        val selectedDriver = VulkanDriver.selected(this, kind)
+        val installed = VulkanDriver.list(this, kind)
         val gpuLabel = gpuInfo?.label ?: "Detectando GPU e Vulkan…"
         settingsGpu.text = gpuLabel
         select.isEnabled = idle
-        play.isEnabled = idle && folder != null
+        play.isEnabled = idle && folder != null && gpuInfo != null
         play.alpha = if (play.isEnabled) 1f else .6f
-        importDriver.isEnabled = idle
-        openHub.isEnabled = idle || installingDriver
+        importDriver.visibility = if (kind == null) View.GONE else View.VISIBLE
+        importDriver.text = "Importar ${kind?.label.orEmpty()} (ZIP, ADPKG ou .so)"
+        importDriver.isEnabled = idle && kind != null
+        openHub.text = kind?.let { "Abrir Hub ${it.label}" } ?: "Abrir Hub de drivers"
+        openHub.isEnabled = gpuInfo != null && (idle || installingDriver)
         importLossless.isEnabled = idle
         downloadMako.isEnabled = idle && !FrameGenAssets.makoInstalled(graphicsProfile())
         frameAssets.text = if (frameAssetBusy) "Instalando arquivo de framegen…" else {
@@ -542,11 +557,11 @@ class HomeActivity : Activity() {
             }
     }.getOrDefault("")
 
-    private fun showDriverHub() {
-        val family = gpuInfo?.family
-        val root = card("Hub de drivers")
-        val subtitle = family?.let { "Turnip para Adreno ${it}xx" } ?: "Drivers Vulkan"
-        root.addView(PortStyle.text(this, subtitle, 14f, PortStyle.muted))
+    private fun showDriverHub(preferred: DriverCatalog.Source?) {
+        val gpu = gpuInfo ?: return
+        val kind = gpu.driverKind
+        val root = card(kind?.let { "Hub ${it.label}" } ?: "Hub de drivers")
+        root.addView(PortStyle.text(this, gpu.name, 14f, PortStyle.muted))
         val tabs = column()
         append(root, tabs)
         val installStatus = PortStyle.text(this, "", 14f, PortStyle.muted).apply {
@@ -563,7 +578,7 @@ class HomeActivity : Activity() {
         val height = (resources.configuration.screenHeightDp - 365).coerceIn(125, 420)
         root.addView(scroll, LinearLayout.LayoutParams(-1, dp(height)).apply { topMargin = dp(12) })
         val dialog = panelDialog(root)
-        val sources = listOf(null) + DriverCatalog.Source.entries
+        val sources = listOf(null) + DriverCatalog.sourcesFor(gpu)
         val buttons = mutableListOf<Button>()
         var active: DriverCatalog.Source? = null
         val loading = mutableSetOf<DriverCatalog.Source>()
@@ -575,7 +590,7 @@ class HomeActivity : Activity() {
         }
 
         fun selectDriver(id: String) {
-            TurnipDriver.select(this, id.ifBlank { null })
+            kind?.let { VulkanDriver.select(this, it, id.ifBlank { null }) }
             DriverInstall.clearResult()
             refreshDriverInstall()
             // A manual selection can change even when there is no prior installation status.
@@ -585,7 +600,7 @@ class HomeActivity : Activity() {
         fun addDriver(id: String, name: String, detail: String, action: String, run: () -> Unit) {
             val row = card(name)
             row.addView(PortStyle.text(this, detail, 13f, PortStyle.muted))
-            val selectedNow = id == TurnipDriver.selected(this).orEmpty()
+            val selectedNow = id == VulkanDriver.selected(this, kind).orEmpty()
             append(row, button(if (selectedNow) "Selecionado" else action,
                 primary = !selectedNow && action == "Baixar", click = { if (!installingDriver) run() }).apply {
                 isEnabled = !selectedNow && !installingDriver
@@ -597,7 +612,7 @@ class HomeActivity : Activity() {
         fun display(entries: List<DriverCatalog.Entry>) {
             results.removeAllViews()
             if (entries.isEmpty()) message("Nenhum driver listado para esta família.")
-            val installedIds = TurnipDriver.list(this).map { it.id }.toSet()
+            val installedIds = VulkanDriver.list(this, kind).map { it.id }.toSet()
             for (entry in entries) {
                 val size = "%.1f MiB".format(entry.size / 1048576.0)
                 val present = entry.id in installedIds
@@ -621,16 +636,13 @@ class HomeActivity : Activity() {
             buttons.forEachIndexed { index, button -> mark(button, sources[index] == source) }
             results.removeAllViews()
             scroll.scrollTo(0, 0)
-            refreshCatalog.isEnabled = source != null && family != null && !installingDriver
+            refreshCatalog.isEnabled = source != null && !installingDriver
             if (source == null) {
                 addDriver("", "Vulkan do sistema", "Driver padrão do Android", "Ativar") { selectDriver("") }
-                for (entry in TurnipDriver.list(this)) {
-                    addDriver(entry.id, entry.name, "Turnip instalado", "Ativar") { selectDriver(entry.id) }
+                for (entry in VulkanDriver.list(this, kind)) {
+                    addDriver(entry.id, entry.name, "${kind?.label} instalado", "Ativar") { selectDriver(entry.id) }
                 }
-                return
-            }
-            if (family == null) {
-                message("O catálogo precisa detectar uma GPU Adreno de uma família disponível.")
+                if (sources.size == 1) message("O catálogo não tem pacotes para esta GPU.")
                 return
             }
             if (!force) catalogs[source]?.let {
@@ -642,7 +654,7 @@ class HomeActivity : Activity() {
             message("Carregando drivers de ${source.label}…")
             if (!loading.add(source)) return
             Thread {
-                val result = runCatching { DriverCatalog.fetch(source, family) }
+                val result = runCatching { DriverCatalog.fetch(source, gpu) }
                 runOnUiThread {
                     loading.remove(source)
                     result.onSuccess { catalogs[source] = it }
@@ -685,12 +697,16 @@ class HomeActivity : Activity() {
         }
         dialog.setOnDismissListener { hubUpdate = null }
         dialog.show()
-        show(lastHubSource)
+        show(preferred?.takeIf { it in sources })
         hubUpdate?.invoke()
     }
 
-    private fun gameIntent() = settings.applyTo(Intent(this, GameActivity::class.java))
-        .putExtra("driver_id", TurnipDriver.selected(this))
+    private fun gameIntent(): Intent {
+        val kind = gpuInfo?.driverKind
+        return settings.applyTo(Intent(this, GameActivity::class.java))
+            .putExtra("driver_kind", kind?.name)
+            .putExtra("driver_id", VulkanDriver.selected(this, kind))
+    }
 
     private fun openPicker() = startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_FOLDER)
 
@@ -710,10 +726,11 @@ class HomeActivity : Activity() {
             frameAssetTask { FrameGenAssets.importDll(applicationContext, graphicsProfile(), uri) }
             return
         }
-        if (code == PICK_TURNIP) {
+        if (code == PICK_DRIVER) {
             val context = applicationContext
-            DriverInstall.start("Turnip importado", "Importando driver…") {
-                TurnipDriver.install(context, uri)
+            val kind = gpuInfo?.driverKind ?: return
+            DriverInstall.start("${kind.label} importado", "Importando driver…") {
+                VulkanDriver.install(context, kind, uri)
             }
             return
         }
@@ -734,7 +751,7 @@ class HomeActivity : Activity() {
     private companion object {
         const val STORAGE = 1
         const val PICK_FOLDER = 2
-        const val PICK_TURNIP = 3
+        const val PICK_DRIVER = 3
         const val PICK_LOSSLESS = 4
     }
 }

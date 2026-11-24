@@ -47,10 +47,10 @@ JNIEXPORT jstring JNICALL Java_org_pistonport_nativeandroid_GpuInfoKt_readStockV
                     vkGetPhysicalDeviceProperties(devices[i], &p);
                     const int ready = loader_version >= VK_API_VERSION_1_3 &&
                         p.apiVersion >= VK_API_VERSION_1_3 && extensions_ok(devices[i]);
-                    if (i == 0 || ready || p.vendorID == 0x5143)
-                        snprintf(output, sizeof(output), "%s\t%u.%u.%u\t%d", p.deviceName,
+                    if (i == 0 || ready || p.vendorID == 0x5143 || p.vendorID == 0x13b5)
+                        snprintf(output, sizeof(output), "%s\t%u.%u.%u\t%d\t%x", p.deviceName,
                             VK_API_VERSION_MAJOR(p.apiVersion), VK_API_VERSION_MINOR(p.apiVersion),
-                            VK_API_VERSION_PATCH(p.apiVersion), ready);
+                            VK_API_VERSION_PATCH(p.apiVersion), ready, p.vendorID);
                     if (ready) break;
                 }
             }

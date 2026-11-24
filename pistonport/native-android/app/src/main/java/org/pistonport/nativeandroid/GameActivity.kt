@@ -35,17 +35,20 @@ class GameActivity : SDLActivity() {
         val profile = profile(this)
         profile.mkdirs()
         val driverId = intent.getStringExtra("driver_id")
+        val driverKind = DriverKind.entries.firstOrNull { it.name == intent.getStringExtra("driver_kind") }
         Os.setenv("PISTON_LOG_FILE", logFile(this).path, true)
         Os.setenv("SPARTAN_CONFIG", File(profile, "pistonport.ini").path, true)
         Os.setenv("SPARTAN_GPU_USER_DIR", profile.path, true)
         Os.setenv("SPARTAN_FPS_LIMIT", intent.getIntExtra("fps", 30).toString(), true)
         Os.setenv("SPARTAN_FULLSCREEN", "1", true)
-        if (driverId != null) {
-            Os.setenv("PISTON_TURNIP_DIR", TurnipDriver.directory(this, driverId).path + "/", true)
+        Os.unsetenv("PISTON_TURNIP_DIR")
+        Os.unsetenv("PISTON_PANVK_DIR")
+        Os.unsetenv("PISTON_DRIVER_HOOKS")
+        if (driverId != null && driverKind != null) {
+            val directory = VulkanDriver.directory(this, driverKind, driverId)
+            val variable = if (driverKind == DriverKind.PANVK) "PISTON_PANVK_DIR" else "PISTON_TURNIP_DIR"
+            Os.setenv(variable, directory.path + "/", true)
             Os.setenv("PISTON_DRIVER_HOOKS", applicationInfo.nativeLibraryDir + "/", true)
-        } else {
-            Os.unsetenv("PISTON_TURNIP_DIR")
-            Os.unsetenv("PISTON_DRIVER_HOOKS")
         }
         Os.setenv("SPARTAN_ANISOTROPY", intent.getIntExtra("filtering", 0).toString(), true)
         configureGraphics(profile)

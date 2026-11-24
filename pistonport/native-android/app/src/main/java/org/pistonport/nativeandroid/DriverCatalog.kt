@@ -12,21 +12,48 @@ import org.json.JSONArray
 internal object DriverCatalog {
     private const val CATALOG_LIMIT = 6 * 1024 * 1024
     private const val DRIVER_LIMIT = 128 * 1024 * 1024
-    enum class Source(val label: String, val repo: String) {
+    enum class Source(val label: String, val repo: String, val kind: DriverKind = DriverKind.TURNIP) {
         STEVEN("StevenMXZ", "StevenMXZ/Adreno-Tools-Drivers"),
         PURPLE("Mesa Purple", "MrPurple666/purple-turnip"),
         ADRENO_TOOLS("AdrenoTools", "K11MCH1/AdrenoToolsDrivers"),
-        BANNERS("Banners Turnip", "The412Banner/Banners-Turnip")
+        BANNERS("Banners Turnip", "The412Banner/Banners-Turnip"),
+        ZENITHBLUE("Zenithblue", "zenithblue-oss/panvk-kbase-android", DriverKind.PANVK),
+        JIMVULKAN("JimVulkan", "JimVulkan/mali-panvk", DriverKind.PANVK),
+        MINEGRAPH("MineGraph", "MineGraph-bilibili/panvk-Android", DriverKind.PANVK),
+        SOULEXIT("soulexit", "soulexit/panvk-bifrost-soulexit", DriverKind.PANVK),
+        FRIST_ONE("FristOneRR", "FristOneRR/FristOneRR-Panvk-Driver", DriverKind.PANVK)
     }
 
     private val bannersAndroid = Regex("""Turnip-v[\d.]+-\d{8}-r\d+\.zip""", RegexOption.IGNORE_CASE)
+    private val bifrost = setOf(31, 51, 52, 71, 72, 76)
+    private val valhall = setOf(57, 68, 77, 78)
+    private val mineGraph = setOf(610, 615, 710, 715, 720)
+    private val jimRevision = Regex("""mali-panvk-.*-r(\d+)\.zip""")
+    private val fristModern = Regex("""panvk-fristonerr-v\.([3-9])\..+\.zip""")
     private val downloads = setOf("github.com", "release-assets.githubusercontent.com",
         "objects.githubusercontent.com", "github-releases.githubusercontent.com")
 
     data class Entry(val id: String, val name: String, val source: String, val url: String,
-        val size: Long, val digest: String, val date: String)
+        val size: Long, val digest: String, val date: String, val kind: DriverKind)
 
-    fun fetch(source: Source, family: Int): List<Entry> {
+    fun sourcesFor(gpu: GpuInfo): List<Source> = when (gpu.driverKind) {
+        DriverKind.TURNIP -> Source.entries.filter { it.kind == DriverKind.TURNIP }
+        DriverKind.PANVK -> Source.entries.filter { it.kind == DriverKind.PANVK && supportsMali(it, gpu.maliModel) }
+        null -> emptyList()
+    }
+
+    private fun supportsMali(source: Source, model: Int?): Boolean = when (source) {
+        Source.ZENITHBLUE -> model in bifrost || model in valhall || model in mineGraph ||
+            model in setOf(310, 510, 620, 625, 725, 925, 1)
+        Source.JIMVULKAN -> model in bifrost || model in valhall || model in mineGraph || model in setOf(925, 1)
+        Source.MINEGRAPH -> model in mineGraph
+        Source.SOULEXIT -> model in setOf(52, 72, 76)
+        Source.FRIST_ONE -> model in valhall
+        else -> false
+    }
+
+    fun fetch(source: Source, gpu: GpuInfo): List<Entry> {
+        require(source in sourcesFor(gpu)) { "Esta fonte não oferece pacotes para a GPU detectada." }
         val items = mutableListOf<Entry>()
         val repo = source.repo
         open("https://api.github.com/repos/$repo/releases?per_page=30", setOf("api.github.com")) { stream ->
@@ -43,21 +70,41 @@ internal object DriverCatalog {
                     val name = asset.optString("name")
                     val url = asset.optString("browser_download_url")
                     val size = asset.optLong("size")
-                    val supported = when (source) {
-                        Source.PURPLE -> purpleCompatible(name, release.optString("body"), family)
-                        Source.BANNERS -> family in 6..7 && bannersAndroid.matches(name)
-                        else -> compatible(name, family)
+                    val supported = if (source.kind == DriverKind.PANVK) {
+                        panvkCompatible(source, name.lowercase(), gpu.maliModel)
+                    } else {
+                        val family = requireNotNull(gpu.adrenoFamily)
+                        when (source) {
+                            Source.PURPLE -> purpleCompatible(name, release.optString("body"), family)
+                            Source.BANNERS -> family in 6..7 && bannersAndroid.matches(name)
+                            else -> compatible(name, family)
+                        }
                     }
                     if (!supported || size !in 1L..DRIVER_LIMIT.toLong() ||
                         !url.startsWith("https://github.com/$repo/releases/download/")) continue
                     val number = asset.optLong("id")
                     if (number <= 0) continue
                     items.add(Entry("github-$number", name.substringBeforeLast('.'),
-                        source.label, url, size, asset.optString("digest"), asset.optString("updated_at")))
+                        source.label, url, size, asset.optString("digest"), asset.optString("updated_at"), source.kind))
                 }
             }
         }
         return items.distinctBy(Entry::id).sortedByDescending(Entry::date).take(20)
+    }
+
+    private fun panvkCompatible(source: Source, name: String, model: Int?): Boolean = when (source) {
+        Source.ZENITHBLUE -> name.endsWith(".adpkg.zip") &&
+            (name.startsWith("mesa-panvk-android-") ||
+                (model == 615 && name.startsWith("panvk-kbase-android-")))
+        Source.JIMVULKAN -> {
+            val revision = jimRevision.matchEntire(name)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            revision >= 9 || (revision == 8 && model !in setOf(925, 1)) || (revision in 1..4 && model in bifrost)
+        }
+        Source.MINEGRAPH -> name.startsWith("mesa") && "panvk" in name && name.endsWith(".zip")
+        Source.SOULEXIT -> Regex("""soulexit-panvk-[\d.]+\.zip""").matches(name)
+        Source.FRIST_ONE -> fristModern.matches(name) ||
+            (model == 57 && name.startsWith("panvk-mali-g57-") && name.endsWith(".zip"))
+        else -> false
     }
 
     private fun purpleCompatible(name: String, notes: String, family: Int): Boolean {
@@ -83,7 +130,7 @@ internal object DriverCatalog {
     }
 
     fun install(context: Context, entry: Entry, report: (String) -> Unit) {
-        val temporary = File.createTempFile("turnip-download-", ".zip", context.cacheDir)
+        val temporary = File.createTempFile("vulkan-download-", ".zip", context.cacheDir)
         try {
             val sha = MessageDigest.getInstance("SHA-256")
             open(entry.url, downloads) { input ->
@@ -112,7 +159,7 @@ internal object DriverCatalog {
             if (entry.digest.startsWith("sha256:")) {
                 require(entry.digest.equals("sha256:$digest", ignoreCase = true)) { "O SHA-256 do driver não confere." }
             }
-            temporary.inputStream().use { TurnipDriver.install(context, it, entry.id, entry.name) }
+            temporary.inputStream().use { VulkanDriver.install(context, entry.kind, it, entry.id, entry.name) }
         } finally {
             temporary.delete()
         }
