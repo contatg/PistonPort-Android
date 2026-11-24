@@ -56,8 +56,16 @@ Ao abrir o launcher, ele consulta a última versão estável em [GitHub Releases
 
 Para instalar uma atualização por cima da versão anterior, os dois APKs precisam ter a mesma assinatura Android.
 
-## Credits
+## Créditos e licenças / Credits & licenses
 
-PistonPort uses SpartanPort’s loader, shadPS4’s Vulkan renderer, and Rune for the launcher. [SpartanPort](https://github.com/FelipePrado0/SpartanPort) · [shadPS4](https://github.com/shadps4-emu/shadPS4) · [Rune](https://github.com/anomalyco/rune) · [License](LICENSE)
+**Adaptação e manutenção Android:** [contatg](https://github.com/contatg) · [PistonPort-Android](https://github.com/contatg/PistonPort-Android).
 
-Mais detalhes nos [créditos da versão Android](pistonport/native-android/CREDITS.md).
+**Projeto original:** [afkarxyz/PistonPort](https://github.com/afkarxyz/PistonPort). Agradecimentos aos autores e colaboradores de [SpartanPort](https://github.com/FelipePrado0/SpartanPort), [shadPS4](https://github.com/shadps4-emu/shadPS4), [gow3_android (zFitness)](https://github.com/zFitness/gow3_android), [gow3_android (niilo)](https://github.com/niilo/gow3_android), [FEX](https://github.com/FEX-Emu/FEX), [FEXDroid](https://github.com/cobrabm12/fexdroid), [Rune](https://github.com/anomalyco/rune), [Bloodborne-Android](https://github.com/ducvd89/Bloodborne-Android), [Bloodframe](https://github.com/ducvd89/bloodframe), [lsfg-vk](https://github.com/PancakeTAS/lsfg-vk), Ragnarok93/GameNative, [Fractal](https://github.com/dfdx047/Fractal), [libadrenotools](https://github.com/bylaws/libadrenotools), [Mesa](https://mesa3d.org/), [SDL](https://github.com/libsdl-org/SDL), [AMD GPUOpen](https://gpuopen.com/), [Snapdragon GSR 2](https://github.com/SnapdragonStudios/snapdragon-gsr) e [MAKO-FG](https://huggingface.co/eugeniosegala/MAKO-FG).
+
+Agradecemos também aos mantenedores dos drivers Turnip/PanVK, bibliotecas, ferramentas de build, ícones, fontes e recursos listados abaixo. Piston Frame é uma adaptação baseada no Bloodframe, não uma implementação originalmente independente.
+
+- [Créditos detalhados da versão Android](pistonport/native-android/CREDITS.md)
+- [Inventário de licenças, autores e avisos de terceiros](licenses/README.md)
+- [Licença principal GNU GPL v2](LICENSE)
+
+Os componentes externos mantêm suas próprias licenças. Nenhum crédito implica afiliação oficial ou transferência de autoria. Os arquivos proprietários do jogo não são licenciados por este projeto.
