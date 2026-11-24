@@ -1,4 +1,10 @@
-# PistonPort
+# PistonPort-Android
+
+**Adaptação Android e manutenção:** [contatg](https://github.com/contatg) · **Projeto original:** [afkarxyz/PistonPort](https://github.com/afkarxyz/PistonPort).
+
+[Releases Android](https://github.com/contatg/PistonPort-Android/releases) · [Créditos e agradecimentos](#créditos-e-licenças--credits--licenses) · [Licenças de terceiros](licenses/README.md)
+
+> Projeto independente e experimental para Android, derivado do PistonPort original para Windows. Os links e instruções Windows abaixo são referências ao projeto original.
 
 [![Stars](https://img.shields.io/github/stars/afkarxyz/PistonPort?color=ffcb47&labelColor=black&logo=github&label=Stars)](https://github.com/afkarxyz/PistonPort/stargazers)
 [![Downloads](https://img.shields.io/github/downloads/afkarxyz/PistonPort/total?color=22c55e&labelColor=black&logo=github&label=Downloads)](https://github.com/afkarxyz/PistonPort/releases)
@@ -62,7 +68,9 @@ Para instalar uma atualização por cima da versão anterior, os dois APKs preci
 
 **Projeto original:** [afkarxyz/PistonPort](https://github.com/afkarxyz/PistonPort). Agradecimentos aos autores e colaboradores de [SpartanPort](https://github.com/FelipePrado0/SpartanPort), [shadPS4](https://github.com/shadps4-emu/shadPS4), [gow3_android (zFitness)](https://github.com/zFitness/gow3_android), [gow3_android (niilo)](https://github.com/niilo/gow3_android), [FEX](https://github.com/FEX-Emu/FEX), [FEXDroid](https://github.com/cobrabm12/fexdroid), [Rune](https://github.com/anomalyco/rune), [Bloodborne-Android](https://github.com/ducvd89/Bloodborne-Android), [Bloodframe](https://github.com/ducvd89/bloodframe), [lsfg-vk](https://github.com/PancakeTAS/lsfg-vk), Ragnarok93/GameNative, [Fractal](https://github.com/dfdx047/Fractal), [libadrenotools](https://github.com/bylaws/libadrenotools), [Mesa](https://mesa3d.org/), [SDL](https://github.com/libsdl-org/SDL), [AMD GPUOpen](https://gpuopen.com/), [Snapdragon GSR 2](https://github.com/SnapdragonStudios/snapdragon-gsr) e [MAKO-FG](https://huggingface.co/eugeniosegala/MAKO-FG).
 
-**Bibliotecas e ferramentas:** Dear ImGui, LibAtrac9, magic_enum, miniz, Xbyak, half, sirit, SPIRV-Headers, SMAA, Intel XeSS, fmt, Boost, robin-map, Zydis, FFmpeg, xxHash, X.Org/X11, glslang, Chaquopy, Python, pyelftools, Pillow, Android SDK/NDK, LLVM, Kotlin, Gradle, Rust e as dependências Rust do launcher e do leitor PKG.
+**Bibliotecas e ferramentas:** Dear ImGui, LibAtrac9, magic_enum, miniz, Xbyak, half (Christian Rau), sirit, SPIRV-Headers (Khronos), AMD GCN, SMAA, Intel XeSS, fmt, Boost, robin-map, Zydis, FFmpeg, xxHash, X.Org/X11, glslang, Chaquopy, Python, pyelftools, Pillow, Android SDK/NDK, LLVM, Kotlin, Gradle, Rust e as dependências Rust do launcher e do leitor PKG.
+
+**Infraestrutura de build:** CMake, Ninja, GitHub Actions, Docker setup-qemu, QEMU, patchelf e SquashFS tools. São ferramentas de compilação e empacotamento, não necessariamente componentes do APK.
 
 **Recursos visuais:** Lucide, Kenney Input Prompts e DejaVu Sans.
 
