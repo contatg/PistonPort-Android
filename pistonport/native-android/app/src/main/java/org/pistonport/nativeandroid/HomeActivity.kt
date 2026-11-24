@@ -164,7 +164,7 @@ class HomeActivity : Activity() {
 
     private fun buildGraphics(): LinearLayout = column().apply {
         addView(PortStyle.text(this@HomeActivity,
-            "Durante a corrida, deslize do meio da borda direita para dentro para abrir os ajustes.",
+            "Durante a corrida, deslize do meio de qualquer borda lateral para dentro para abrir os ajustes.",
             13f, PortStyle.muted))
         val rendering = card("Imagem e desempenho")
         append(rendering, Switch(this@HomeActivity).apply {
@@ -186,7 +186,7 @@ class HomeActivity : Activity() {
         graphicsChoice(rendering, "Proporção da imagem", "aspect", 0,
             aspectRatios.mapIndexed { index, aspect -> index to if (index == 0) "Automática" else aspect })
         graphicsChoice(rendering, "Upscaler", "upscaler", 0,
-            listOf(0 to "Desligado", 1 to "FSR 3.1", 2 to "TAA", 3 to "GSR 2"))
+            listOf(0 to "Desligado", 1 to "FSR 3.1", 2 to "TAA", 3 to "GSR 2", 4 to "FSR 1"))
         graphicsChoice(rendering, "Qualidade do upscaler", "preset", 3, listOf(
             0 to "Nativa", 5 to "Ultra qualidade", 1 to "Qualidade",
             2 to "Equilibrado", 3 to "Desempenho", 4 to "Ultra desempenho"))
@@ -218,7 +218,7 @@ class HomeActivity : Activity() {
 
         val frame = card("Geração de quadros")
         graphicsChoice(frame, "Método", "framegen", 0, listOf(0 to "Desligado", 1 to "FSR 3.1 · 2×",
-            2 to "Bloodframe · 2×", 3 to "Bloodframe · 3×", 4 to "Bloodframe · 4×"))
+            2 to "Bloodframe · 2×", 3 to "Bloodframe · 3×", 4 to "Bloodframe · 4×", 5 to "Mescla · 2×"))
         graphicsChoice(frame, "Modelo Bloodframe", "fg_model", 0,
             listOf(0 to "Lossless Scaling", 1 to "MAKO-FG experimental"))
         graphicsSlider(frame, "Escala de movimento", "fg_flow", 25, 100, 75)
@@ -429,7 +429,7 @@ class HomeActivity : Activity() {
         val selectedResolution = settings.launchResolution
         val generation = settings.launchFrameGeneration
         val profile = graphicsProfile()
-        if (generation >= 2) {
+        if (generation in 2..4) {
             val mako = settings.choice("fg_model", 0) == 1
             val ready = if (mako) FrameGenAssets.makoInstalled(profile) else FrameGenAssets.lossless(profile).isFile
             if (!ready) {

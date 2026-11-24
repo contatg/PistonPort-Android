@@ -18,16 +18,29 @@ internal class RaceSettingsPanel(
     private val hasLossless: Boolean,
     private val onGraphics: (State) -> Unit,
     private val onOverlay: (State) -> Unit,
-    private val nativeStatus: () -> Int
+    private val nativeStatus: () -> Int,
+    private val upscalerStatus: () -> Int
 ) : FrameLayout(context) {
     data class State(var framegen: Int, var upscaler: Int, var model: Int,
         var fps: Boolean, var touch: Boolean)
 
+    private lateinit var pane: LinearLayout
     private val status = PortStyle.text(context, "", 13f, PortStyle.muted)
+    private val upscaleReadout = PortStyle.text(context, "", 13f, PortStyle.muted)
     private val tick = object : Runnable {
         override fun run() {
+            val provider = upscalerStatus()
+            upscaleReadout.text = when {
+                state.upscaler == 0 -> ""
+                provider == 4 && state.upscaler != 4 -> "FSR 1 ativo como alternativa."
+                provider != 0 -> "${upscalerName(provider)} ativo."
+                state.upscaler == 2 -> "Aguardando uma cena compatível com TAA."
+                else -> "Aguardando um quadro abaixo da resolução de saída."
+            }
+            upscaleReadout.visibility = if (state.upscaler == 0) View.GONE else View.VISIBLE
             status.text = when {
                 state.framegen == 0 -> "Framegen desligado."
+                state.framegen == 5 -> "Mescla dois quadros do jogo. Veja o resultado no medidor de FPS."
                 state.framegen == 1 && state.upscaler != 1 -> "Selecione o upscaler FSR 3.1 para usar este framegen."
                 state.framegen == 1 -> "FSR 3.1 selecionado. O medidor indica quando há quadros gerados."
                 !modelReady(state.model) -> "Instale o modelo ou importe sua Lossless.dll no launcher."
@@ -45,7 +58,7 @@ internal class RaceSettingsPanel(
     init {
         setBackgroundColor(0x52000000)
         setOnClickListener { visibility = View.GONE }
-        val pane = LinearLayout(context).apply {
+        pane = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             isClickable = true
             background = PortStyle.panel(context, PortStyle.surface, 18, PortStyle.border)
@@ -67,12 +80,13 @@ internal class RaceSettingsPanel(
         toggle(content, "Mostrar FPS e GPU", state.fps) { state.fps = it; onOverlay(state) }
         toggle(content, "Controles por toque", state.touch) { state.touch = it; onOverlay(state) }
         section(content, "Upscaler")
-        options(content, listOf("Desligado", "FSR 3.1", "TAA", "GSR 2"), 2, { state.upscaler }) {
+        options(content, listOf("Desligado", "FSR 3.1", "TAA", "GSR 2", "FSR 1"), 2, { state.upscaler }) {
             state.upscaler = it
             onGraphics(state)
         }
+        content.addView(upscaleReadout)
         section(content, "Geração de quadros")
-        options(content, listOf("Desligado", "FSR 2×", "Bloodframe 2×", "3×", "4×"), 3, { state.framegen }) {
+        options(content, listOf("Desligado", "FSR 2×", "Bloodframe 2×", "3×", "4×", "Mescla 2×"), 3, { state.framegen }) {
             state.framegen = it
             onGraphics(state)
         }
@@ -91,6 +105,13 @@ internal class RaceSettingsPanel(
         if (changedView !== this) return
         removeCallbacks(tick)
         if (visibility == View.VISIBLE) post(tick)
+    }
+
+    fun open(fromLeft: Boolean) {
+        val params = pane.layoutParams as LayoutParams
+        params.gravity = if (fromLeft) Gravity.LEFT else Gravity.RIGHT
+        pane.layoutParams = params
+        visibility = View.VISIBLE
     }
 
     override fun onDetachedFromWindow() {

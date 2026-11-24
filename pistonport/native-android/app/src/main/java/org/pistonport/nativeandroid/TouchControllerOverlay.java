@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PointF;
 import android.graphics.Typeface;
 import android.util.SparseArray;
@@ -22,16 +23,15 @@ import java.util.Set;
  */
 final class TouchControllerOverlay extends View {
     private static final String[] NAMES={
-        "l2","l1","touchpad","options","r1","r2",
-        "up","left","right","down","triangle","circle","cross","square",
-        "leftstick","l3","r3"
+        "l2","l1","options","r1","r2",
+        "up","left","right","down","triangle","circle","cross","square","leftstick"
     };
     private static final float[][] DEFAULT={
-        {87,105},{213,105},{640,105},{773,105},{1067,105},{1193,105},
-        {160,395},{90,465},{230,465},{160,535},
-        {1120,405},{1190,475},{1120,545},{1050,475},
-        {320,612},{420,614},{860,614}
+        {100,590},{125,116},{640,75},{1145,116},{1170,598},
+        {224,104},{181,150},{267,150},{224,196},{1161,366},{1170,478},{1023,510},{1028,393},{205,470}
     };
+    private final Path controlShape = new Path();
+    private final Typeface lettering = Typeface.create("sans-serif-condensed", Typeface.BOLD);
     /** Camera touch: the drag (layout pixels) from where it landed that tilts the right stick fully. */
     private static final float CAMERA_RANGE=64;
     /** A control's size in the editor: a factor of its default size. */
@@ -60,7 +60,7 @@ final class TouchControllerOverlay extends View {
 
     TouchControllerOverlay(Context context,Input pad) {
         super(context); this.pad=pad;
-        preferences=context.getSharedPreferences("piston-touch",Context.MODE_PRIVATE);
+        preferences=context.getSharedPreferences("piston-race-controls",Context.MODE_PRIVATE);
         load(null);
         setContentDescription("Controle de PlayStation na tela");
     }
@@ -154,9 +154,18 @@ final class TouchControllerOverlay extends View {
     private float layoutY(MotionEvent e,int index) { return (e.getY(index)-offsetY())/scale(); }
     private static float distance(float x,float y,PointF p) { return (float)Math.hypot(x-p.x,y-p.y); }
     private static boolean stick(String name) { return name.equals("leftstick"); }
-    private static boolean rectangle(String name) {
-        return name.equals("l1") || name.equals("l2") || name.equals("r1") ||
-               name.equals("r2") || name.equals("touchpad") || name.equals("options");
+    private static boolean direction(String name) {
+        return name.equals("up") || name.equals("down") || name.equals("left") || name.equals("right");
+    }
+    private static float halfWidth(String name) {
+        if (direction(name)) return 20;
+        if (name.equals("r2") || name.equals("l2")) return 60;
+        return 53;
+    }
+    private static float halfHeight(String name) {
+        if (direction(name)) return 17;
+        if (name.equals("r2") || name.equals("l2")) return 42;
+        return 29;
     }
     private PointF dpadCenter() {
         PointF u=center("up"),l=center("left"),r=center("right"),d=center("down");
@@ -166,7 +175,7 @@ final class TouchControllerOverlay extends View {
     private float dpadSize() { return (size("up")+size("left")+size("right")+size("down"))/4f; }
     private String hit(float x,float y) {
         PointF dpad=dpadCenter(); float k=dpadSize();
-        if (!editing && distance(x,y,dpad)<112*k && distance(center("up").x,center("up").y,dpad)<115*k &&
+        if (!editing && distance(x,y,dpad)<76*k && distance(center("up").x,center("up").y,dpad)<115*k &&
             distance(center("left").x,center("left").y,dpad)<115*k &&
             distance(center("right").x,center("right").y,dpad)<115*k &&
             distance(center("down").x,center("down").y,dpad)<115*k) return "dpad";
@@ -174,8 +183,8 @@ final class TouchControllerOverlay extends View {
         for (String name:NAMES) {
             PointF p=center(name); float s=size(name);
             float dx=Math.abs(x-p.x),dy=Math.abs(y-p.y);
-            boolean inside=rectangle(name) ? dx<(name.equals("touchpad") ? 72 : 62)*s && dy<38*s
-                    : distance(x,y,p)<(stick(name) ? 70 : name.equals("l3") || name.equals("r3") ? 39 : 48)*s;
+            boolean inside = stick(name) ? distance(x,y,p) < 78*s
+                    : dx < (halfWidth(name)+6)*s && dy < (halfHeight(name)+6)*s;
             if (inside && distance(x,y,p)<best) { best=distance(x,y,p); winner=name; }
         }
         return winner;
@@ -191,7 +200,7 @@ final class TouchControllerOverlay extends View {
             PointF p=positions.get(controls.keyAt(i));
             if (p==null) continue;
             if (control.equals("dpad")) {
-                PointF c=dpadCenter(); float t=22*dpadSize();
+                PointF c=dpadCenter(); float t=20*dpadSize();
                 if (p.x<c.x-t) pressed.add("left");
                 if (p.x>c.x+t) pressed.add("right");
                 if (p.y<c.y-t) pressed.add("up");
@@ -204,8 +213,8 @@ final class TouchControllerOverlay extends View {
                 right=true;
                 rx=axis(Math.max(-1f,Math.min(1f,(p.x-cameraAnchor.x)/CAMERA_RANGE)));
                 ry=axis(Math.max(-1f,Math.min(1f,(p.y-cameraAnchor.y)/CAMERA_RANGE)));
-            } else if (control.equals("l2")) l2=255;
-            else if (control.equals("r2")) r2=255;
+            } else if (control.equals("l2")) { l2=255; pressed.add(control); }
+            else if (control.equals("r2")) { r2=255; pressed.add(control); }
             else if (!control.equals("none")) pressed.add(control);
         }
         pad.update(pressed,lx,ly,rx,ry,left,right,l2,r2);
@@ -328,73 +337,94 @@ final class TouchControllerOverlay extends View {
         publish(); return true;
     }
 
-    private int fill(String name) {
-        return name.equals(dragged) ? 0xfff0d5df : pressed.contains(name) ? 0xaae8dfc9 : 0x663e1b2a;
-    }
-    /** The control the editor resizes: an outline around it. */
     private void selection(Canvas c,String name,float halfWidth,float halfHeight) {
         if (!editing || !name.equals(selected)) return;
         PointF p=center(name);
-        paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(3); paint.setColor(0xfff0d5df);
-        c.drawRoundRect(p.x-halfWidth-8,p.y-halfHeight-8,p.x+halfWidth+8,p.y+halfHeight+8,16,16,paint);
+        paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(3); paint.setColor(0xfffbdbe1);
+        c.drawRoundRect(p.x-halfWidth-6,p.y-halfHeight-6,p.x+halfWidth+6,p.y+halfHeight+6,12,12,paint);
     }
-    private void circle(Canvas c,String name,float r,String label,int accent) {
-        PointF p=center(name); float s=size(name); r*=s;
-        paint.setStyle(Paint.Style.FILL); paint.setColor(fill(name));
-        c.drawCircle(p.x,p.y,r,paint);
-        paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(3); paint.setColor(accent);
-        c.drawCircle(p.x,p.y,r,paint);
-        paint.setStyle(Paint.Style.FILL); paint.setTypeface(Typeface.DEFAULT_BOLD);
-        paint.setTextSize((label.length()>2 ? 19 : 33)*s); paint.setTextAlign(Paint.Align.CENTER);
-        c.drawText(label,p.x,p.y-(paint.ascent()+paint.descent())/2,paint);
-        selection(c,name,r,r);
+
+    private void label(Canvas c,String value,float x,float y,float size,int color) {
+        paint.setStyle(Paint.Style.FILL);
+        paint.setTypeface(lettering);
+        paint.setTextAlign(Paint.Align.CENTER);
+        paint.setTextSize(size);
+        paint.setColor(color);
+        paint.setShadowLayer(2, 0, 1, 0xee16060b);
+        c.drawText(value,x,y,paint);
+        paint.clearShadowLayer();
     }
-    private void rectangle(Canvas c,String name,float width,String label) {
-        PointF p=center(name); float s=size(name), w=width*s/2, h=25*s;
-        paint.setStyle(Paint.Style.FILL); paint.setColor(fill(name));
-        c.drawRoundRect(p.x-w,p.y-h,p.x+w,p.y+h,14*s,14*s,paint);
-        paint.setStyle(Paint.Style.STROKE); paint.setColor(0xcaff7186); paint.setStrokeWidth(2);
-        c.drawRoundRect(p.x-w,p.y-h,p.x+w,p.y+h,14*s,14*s,paint);
-        paint.setStyle(Paint.Style.FILL); paint.setTypeface(Typeface.DEFAULT_BOLD);
-        paint.setTextSize(19*s); paint.setTextAlign(Paint.Align.CENTER);
-        c.drawText(label,p.x,p.y-(paint.ascent()+paint.descent())/2,paint);
+
+    private void plate(Canvas c,String name,String key,String action) {
+        PointF p=center(name);
+        float s=size(name), w=halfWidth(name)*s, h=halfHeight(name)*s, chamfer=13*s;
+        boolean hot=pressed.contains(name) || name.equals(dragged);
+        controlShape.reset();
+        controlShape.moveTo(p.x-w+chamfer,p.y-h);
+        controlShape.lineTo(p.x+w,p.y-h);
+        controlShape.lineTo(p.x+w,p.y+h-chamfer);
+        controlShape.lineTo(p.x+w-chamfer,p.y+h);
+        controlShape.lineTo(p.x-w,p.y+h);
+        controlShape.lineTo(p.x-w,p.y-h+chamfer);
+        controlShape.close();
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(hot ? 0xeea81633 : 0xcf29141d);
+        c.drawPath(controlShape,paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(2.5f*s);
+        paint.setColor(hot ? 0xffffbd91 : 0xd8f75868);
+        c.drawPath(controlShape,paint);
+        paint.setStyle(Paint.Style.FILL);
+        if (direction(name)) {
+            label(c,key,p.x,p.y+6*s,18*s,0xfffce8e8);
+        } else {
+            c.drawRect(p.x-w+8*s,p.y+h-9*s,p.x-w+18*s,p.y+h-5*s,paint);
+            c.drawRect(p.x-w+21*s,p.y+h-9*s,p.x-w+29*s,p.y+h-5*s,paint);
+            label(c,key,p.x,p.y-h+10*s,17*s,0xffffa79c);
+            label(c,action,p.x,p.y+9*s,(action.length()>10 ? 13 : 18)*s,0xfffff4ef);
+        }
         selection(c,name,w,h);
     }
-    private void drawStick(Canvas c,String name) {
-        PointF center=center(name); float s=size(name), travel=27*s;
-        paint.setStyle(Paint.Style.FILL); paint.setColor(name.equals(dragged) ? 0xfff0d5df : 0x663e1b2a);
-        c.drawCircle(center.x,center.y,57*s,paint);
-        paint.setStyle(Paint.Style.STROKE); paint.setColor(0xffa0aec0); paint.setStrokeWidth(3);
-        c.drawCircle(center.x,center.y,57*s,paint);
-        float knobX=center.x,knobY=center.y;
+
+    private void drawStick(Canvas c) {
+        final String name="leftstick";
+        PointF p=center(name); float s=size(name), travel=36*s;
+        paint.setStyle(Paint.Style.FILL); paint.setColor(0xc927161b);
+        c.drawCircle(p.x,p.y,67*s,paint);
+        paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(5*s); paint.setColor(0xfff14355);
+        c.drawArc(p.x-67*s,p.y-67*s,p.x+67*s,p.y+67*s,27,126,false,paint);
+        c.drawArc(p.x-67*s,p.y-67*s,p.x+67*s,p.y+67*s,207,126,false,paint);
+        paint.setStrokeWidth(2*s); paint.setColor(0x99fcb18b);
+        c.drawCircle(p.x,p.y,54*s,paint);
+        float knobX=p.x,knobY=p.y;
         for (int i=0;i<controls.size();i++) {
             if (name.equals(controls.valueAt(i))) {
-                PointF p=positions.get(controls.keyAt(i));
-                if (p!=null) {
-                    knobX=center.x+Math.max(-travel,Math.min(travel,p.x-center.x));
-                    knobY=center.y+Math.max(-travel,Math.min(travel,p.y-center.y));
+                PointF touch=positions.get(controls.keyAt(i));
+                if (touch!=null) {
+                    float dx=touch.x-p.x,dy=touch.y-p.y;
+                    float d=(float)Math.hypot(dx,dy);
+                    float factor=d>travel ? travel/d : 1;
+                    knobX+=dx*factor; knobY+=dy*factor;
                 }
                 break;
             }
         }
-        paint.setStyle(Paint.Style.FILL); paint.setColor(0xbba0aec0);
-        c.drawCircle(knobX,knobY,28*s,paint);
-        paint.setColor(0xff15202c); paint.setTypeface(Typeface.DEFAULT_BOLD);
-        paint.setTextAlign(Paint.Align.CENTER); paint.setTextSize(22*s);
-        c.drawText("L",knobX,knobY-(paint.ascent()+paint.descent())/2,paint);
-        selection(c,name,57*s,57*s);
+        paint.setStyle(Paint.Style.FILL); paint.setColor(0xe9b92c42);
+        c.drawCircle(knobX,knobY,31*s,paint);
+        controlShape.reset();
+        controlShape.moveTo(knobX+4*s,knobY-19*s);
+        controlShape.lineTo(knobX-12*s,knobY+2*s);
+        controlShape.lineTo(knobX-1*s,knobY+2*s);
+        controlShape.lineTo(knobX-5*s,knobY+18*s);
+        controlShape.lineTo(knobX+13*s,knobY-5*s);
+        controlShape.lineTo(knobX+2*s,knobY-5*s);
+        controlShape.close();
+        paint.setColor(0xffffe4c5);
+        c.drawPath(controlShape,paint);
+        label(c,"L • DIREÇÃO",p.x,p.y-78*s,16*s,0xffffd1ca);
+        selection(c,name,67*s,67*s);
     }
-    /** The camera touch: a faint ring where it landed and the knob under the finger. */
-    private void drawCamera(Canvas c) {
-        PointF p=cameraPointer<0 ? null : positions.get(cameraPointer);
-        if (p==null) return;
-        paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(3); paint.setColor(0x66a0aec0);
-        c.drawCircle(cameraAnchor.x,cameraAnchor.y,CAMERA_RANGE,paint);
-        float dx=p.x-cameraAnchor.x,dy=p.y-cameraAnchor.y,length=(float)Math.hypot(dx,dy);
-        float k=length>CAMERA_RANGE ? CAMERA_RANGE/length : 1f;
-        paint.setStyle(Paint.Style.FILL); paint.setColor(0x55a0aec0);
-        c.drawCircle(cameraAnchor.x+dx*k,cameraAnchor.y+dy*k,28,paint);
-    }
+
     private void barButton(Canvas c,float[] box,String label,boolean enabled) {
         paint.setStyle(Paint.Style.FILL); paint.setColor(0xcc15171d);
         c.drawRoundRect(box[0],BAR_TOP,box[1],BAR_BOTTOM,13,13,paint);
@@ -407,15 +437,13 @@ final class TouchControllerOverlay extends View {
     @Override protected void onDraw(Canvas c) {
         super.onDraw(c);
         c.save(); c.translate(offsetX(),offsetY()); c.scale(scale(),scale());
-        rectangle(c,"l2",108,"L2"); rectangle(c,"l1",108,"L1");
-        rectangle(c,"r1",108,"R1"); rectangle(c,"r2",108,"R2");
-        rectangle(c,"touchpad",126,"TOUCH"); rectangle(c,"options",108,"OPTIONS");
-        circle(c,"up",39,"▲",0xffff7186); circle(c,"left",39,"◀",0xffff7186);
-        circle(c,"right",39,"▶",0xffff7186); circle(c,"down",39,"▼",0xffff7186);
-        circle(c,"triangle",39,"△",0xff83cdaa); circle(c,"circle",39,"○",0xffe38288);
-        circle(c,"cross",39,"×",0xff88aaff); circle(c,"square",39,"□",0xffd6a0ce);
-        drawStick(c,"leftstick"); drawCamera(c);
-        circle(c,"l3",29,"L3",0xffa0aec0); circle(c,"r3",29,"R3",0xffa0aec0);
+        plate(c,"l2","L2","FREIO"); plate(c,"l1","L1","REBOQUE");
+        plate(c,"r1","R1","OLHAR ATRÁS"); plate(c,"r2","R2","ACELERAR");
+        plate(c,"options","OPTIONS","PAUSA");
+        plate(c,"up","▲",""); plate(c,"left","◀",""); plate(c,"right","▶",""); plate(c,"down","▼","");
+        plate(c,"triangle","△","ARMA / BUZINA"); plate(c,"circle","○","DRIFT");
+        plate(c,"cross","×","PULAR"); plate(c,"square","□","TURBO");
+        drawStick(c);
         if (editing) {
             barButton(c,RESET,"REPOR",true); barButton(c,MINUS,"−",selected!=null); barButton(c,DONE,"CONCLUIR",true); barButton(c,PLUS,"+",selected!=null);
             paint.setStyle(Paint.Style.FILL); paint.setTextSize(17); paint.setColor(0xfff0d5df);

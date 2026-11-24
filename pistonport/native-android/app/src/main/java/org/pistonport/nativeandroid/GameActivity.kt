@@ -19,6 +19,7 @@ class GameActivity : SDLActivity() {
     private var resumed = false
     private var edgeStartX = Float.NaN
     private var edgeStartY = 0f
+    private var edgeDirection = 0
     private var openingPanel = false
     private lateinit var raceSettings: RaceSettingsPanel.State
 
@@ -63,7 +64,7 @@ class GameActivity : SDLActivity() {
             controls.alpha = intent.getIntExtra("control_opacity", 85).coerceIn(55, 100) / 100f
             addContentView(controls, FrameLayout.LayoutParams(-1, -1))
         }
-        performance = PerformanceHud(this, "").also {
+        performance = PerformanceHud(this, ::upscalerStatus).also {
             addContentView(it, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.RIGHT)
                 .apply { topMargin = dp(12); marginEnd = dp(12) })
         }
@@ -71,7 +72,7 @@ class GameActivity : SDLActivity() {
         val hasLossless = FrameGenAssets.lossless(profile).isFile
         val panel = RaceSettingsPanel(this, raceSettings, hasMako, hasLossless,
             onGraphics = ::applyRaceGraphics, onOverlay = { updateRaceOverlays() },
-            nativeStatus = ::bloodframeStatus)
+            nativeStatus = ::bloodframeStatus, upscalerStatus = ::upscalerStatus)
         racePanel = panel
         addContentView(panel, FrameLayout.LayoutParams(-1, -1))
         val decor = window.decorView
@@ -79,6 +80,7 @@ class GameActivity : SDLActivity() {
             val center = view.height / 2
             val halfHeight = minOf(center, dp(90))
             view.systemGestureExclusionRects = listOf(
+                Rect(0, center - halfHeight, minOf(view.width, dp(24)), center + halfHeight),
                 Rect((view.width - dp(24)).coerceAtLeast(0), center - halfHeight, view.width, center + halfHeight)
             )
         }
@@ -90,8 +92,12 @@ class GameActivity : SDLActivity() {
         val panel = racePanel ?: return super.dispatchTouchEvent(event)
         val action = event.actionMasked
         if (action == MotionEvent.ACTION_DOWN) {
-            val atEdge = event.x >= window.decorView.width - dp(24)
-            edgeStartX = if (atEdge && panel.visibility != View.VISIBLE) event.x else Float.NaN
+            edgeDirection = when {
+                event.x <= dp(24) -> 1
+                event.x >= window.decorView.width - dp(24) -> -1
+                else -> 0
+            }
+            edgeStartX = if (edgeDirection != 0 && panel.visibility != View.VISIBLE) event.x else Float.NaN
             edgeStartY = event.y
             openingPanel = false
         }
@@ -104,7 +110,7 @@ class GameActivity : SDLActivity() {
             edgeStartX = Float.NaN
         }
         if (action == MotionEvent.ACTION_MOVE && !edgeStartX.isNaN()) {
-            val horizontal = edgeStartX - event.x
+            val horizontal = (event.x - edgeStartX) * edgeDirection
             val vertical = kotlin.math.abs(edgeStartY - event.y)
             if (vertical > dp(32) && vertical > horizontal) edgeStartX = Float.NaN
             if (horizontal >= dp(42) && horizontal >= vertical * 1.5f) {
@@ -113,7 +119,7 @@ class GameActivity : SDLActivity() {
                 super.dispatchTouchEvent(cancel)
                 cancel.recycle()
                 hud?.release()
-                panel.visibility = View.VISIBLE
+                panel.open(fromLeft = edgeDirection == 1)
                 openingPanel = true
                 edgeStartX = Float.NaN
                 return true
@@ -124,17 +130,12 @@ class GameActivity : SDLActivity() {
 
     private fun applyRaceGraphics(state: RaceSettingsPanel.State) {
         val available = when (state.framegen) {
-            0 -> true
+            0, 5 -> true
             1 -> state.upscaler == 1
             else -> racePanel?.modelReady(state.model) == true
         }
         setLiveGraphics(if (available) state.framegen else 0, state.upscaler, state.model)
-        performance?.upscaler = when (state.upscaler) {
-            1 -> "FSR 3.1"
-            2 -> "TAA"
-            3 -> "GSR 2"
-            else -> ""
-        }
+
     }
 
     private fun updateRaceOverlays() {
@@ -166,6 +167,7 @@ class GameActivity : SDLActivity() {
 
     private external fun setLiveGraphics(framegen: Int, upscaler: Int, model: Int)
     private external fun bloodframeStatus(): Int
+    private external fun upscalerStatus(): Int
 
     private fun configureGraphics(profile: File) {
         fun number(key: String, default: Int) = intent.getIntExtra(key, default)
@@ -182,7 +184,7 @@ class GameActivity : SDLActivity() {
             3 -> "gsr2"
             else -> "off"
         }
-        val generation = number("framegen", 0).coerceIn(0, 4)
+        val generation = number("framegen", 0).coerceIn(0, 5)
         val video = mapOf(
             "SPARTAN_UPSCALER" to upscaler,
             "SPARTAN_UPSCALE_PRESET" to number("preset", 3).toString(),
