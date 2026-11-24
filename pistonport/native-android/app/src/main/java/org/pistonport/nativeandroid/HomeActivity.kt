@@ -48,7 +48,6 @@ class HomeActivity : Activity() {
     private lateinit var importDriver: Button
     private lateinit var openHub: Button
     private lateinit var settingsGpu: TextView
-    private lateinit var compatibilityButton: Button
     private var hardwareNotice: AlertDialog? = null
     private var gpuInfo: GpuInfo? = null
     private val catalogs = mutableMapOf<DriverCatalog.Source, List<DriverCatalog.Entry>>()
@@ -199,6 +198,7 @@ class HomeActivity : Activity() {
         append(game, select)
         addView(game)
         releaseButton = button(getString(R.string.releases)) { openRelease(availableUpdate?.download ?: ReleaseUpdates.releasesPage) }
+        releaseButton.visibility = View.GONE
         append(this, releaseButton)
     }
 
@@ -211,6 +211,7 @@ class HomeActivity : Activity() {
                 if (!isFinishing && !isDestroyed) {
                     availableUpdate = update
                     releaseButton.text = getString(R.string.download_update, update.version)
+                    releaseButton.visibility = View.VISIBLE
                 }
             }
         }.start()
@@ -333,8 +334,6 @@ class HomeActivity : Activity() {
         append(driver, importDriver)
         openHub = button(getString(R.string.open_hub), primary = true) { showDriverHub(lastHubSource) }
         append(driver, openHub)
-        compatibilityButton = button(getString(R.string.compatibility_review)) { showHardwareNotice(manual = true) }
-        append(driver, compatibilityButton)
         append(this, driver)
         diagnostics = PortStyle.text(this@HomeActivity, "", 12f, PortStyle.muted).apply {
             typeface = Typeface.MONOSPACE
@@ -623,7 +622,6 @@ class HomeActivity : Activity() {
         importDriver.isEnabled = idle && kind != null
         openHub.text = kind?.let { getString(R.string.open_kind_hub, it.label) } ?: getString(R.string.open_hub)
         openHub.isEnabled = gpuInfo != null && (idle || installingDriver)
-        compatibilityButton.isEnabled = gpuInfo != null
         importLossless.isEnabled = idle
         downloadMako.isEnabled = idle && !FrameGenAssets.makoInstalled(graphicsProfile())
         frameAssets.text = if (frameAssetBusy) getString(R.string.installing_framegen) else {
