@@ -34,7 +34,14 @@ class GameActivity : SDLActivity() {
         return arrayOf(image, "--app0", folder, "--user", profile(this).path, "--timeout", "0")
     }
 
+    // SDL may request portrait or a resizable window after native startup.
+    // Keep the game in landscape, independently of the device rotation lock.
+    override fun setOrientationBis(w: Int, h: Int, resizable: Boolean, hint: String?) {
+        requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+    }
+
     override fun onCreate(state: Bundle?) {
+        requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         val profile = profile(this)
         profile.mkdirs()
         val driverId = intent.getStringExtra("driver_id")
