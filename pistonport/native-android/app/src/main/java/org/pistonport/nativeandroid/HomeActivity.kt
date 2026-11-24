@@ -84,6 +84,37 @@ class HomeActivity : Activity() {
                     openRelease("https://github.com/contatg/PistonPort-Android")
                 })
             })
+            val acknowledgements = card("Open source · Third-party credits")
+            val credits = runCatching {
+                assets.open("licenses/CREDITS.md").bufferedReader(Charsets.UTF_8).use { it.readText() }
+            }.getOrDefault("")
+            if (credits.isNotBlank()) {
+                val formatted = android.text.SpannableStringBuilder()
+                val links = Regex("""\[([^\]]+)\]\((https://[^)]+)\)""")
+                for (line in credits.lineSequence()) {
+                    val clean = line.removePrefix("## ").removePrefix("# ")
+                    var offset = 0
+                    for (match in links.findAll(clean)) {
+                        formatted.append(clean.substring(offset, match.range.first))
+                        val start = formatted.length
+                        formatted.append(match.groupValues[1])
+                        formatted.setSpan(android.text.style.URLSpan(match.groupValues[2]), start,
+                            formatted.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        offset = match.range.last + 1
+                    }
+                    formatted.append(clean.substring(offset)).append("\n")
+                }
+                acknowledgements.addView(PortStyle.text(this@HomeActivity, "", 14f, PortStyle.muted).apply {
+                    text = formatted
+                    movementMethod = android.text.method.LinkMovementMethod.getInstance()
+                    setLinkTextColor(PortStyle.accent)
+                })
+            }
+            append(acknowledgements, button("GitHub · CREDITS.md") {
+                openRelease("https://github.com/contatg/PistonPort-Android/blob/main/pistonport/native-android/CREDITS.md")
+            })
+            append(this, acknowledgements)
+
         })
         val menu = LinearLayout(this).apply {
             setBackgroundColor(PortStyle.surface)
