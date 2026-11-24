@@ -1,0 +1,68 @@
+name: Publish verified v0.7.0 beta
+on:
+  push:
+    branches: ['release/v0.7.0-beta.1']
+    paths: ['.github/workflows/publish-beta-070.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Locate and verify the exact supplied APK
+        id: verified
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=c485c35a0115cde868234508abbe92a039a393e2b063bd5f27f8a8b2cd1397fa
+          for run in 45400309237 45398791102 45397896754; do
+            mkdir -p "$RUNNER_TEMP/apk-$run"
+            if ! gh run download "$run" --name PistonPort-Android-DriverHub-APK --dir "$RUNNER_TEMP/apk-$run"; then continue; fi
+            apk="$RUNNER_TEMP/apk-$run/PistonPort-Android-DriverHub-arm64.apk"
+            if [[ -f "$apk" ]] && printf '%s  %s\n' "$expected" "$apk" | sha256sum --check --status; then
+              cp "$apk" "$RUNNER_TEMP/PistonPort-Android-DriverHub-arm64.apk"
+              sha=$(gh api "repos/$GH_REPO/actions/runs/$run" --jq .head_sha)
+              [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No existing artifact matches the supplied APK SHA-256. Nothing was published."
+          exit 1
+      - name: Publish beta prerelease
+        env:
+          SOURCE_SHA: ${{ steps.verified.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          ## PistonPort Android — v0.7.0 Beta 1
+
+          An experimental Android adaptation of PistonPort for Cars 3: Driven to Win (PS4), bringing the original game to ARM64 Android devices through an adapted runtime and Vulkan graphics backend.
+
+          ### Features
+          - Integrated launcher with automatic system-language selection.
+          - Customizable on-screen racing controls and graphics settings.
+          - GPU detection and optional Turnip or PanVK driver management for compatible hardware.
+          - Performance overlay, resolution scaling and experimental Piston Frame options.
+
+          ### Requirements
+          - Android 13 or newer, ARM64 device and a compatible Vulkan driver.
+          - Your own extracted PS4 game folder (CUSA07027 v01.00) containing eboot.bin.
+          - No game files are included.
+
+          ### Installation
+          Download and install the APK attached below, then select the extracted game folder in the launcher. Install a compatible optional driver if required.
+
+          ### Beta notice
+          This is an experimental pre-release. Performance and stability vary by device and driver. Upscaling and frame generation may be unavailable or unstable on some hardware. Report issues with device model, GPU, driver and relevant logs; do not share personal information.
+
+          This is an independent, unofficial project. Original projects and third-party notices are documented in the repository's README and licenses directory.
+          NOTES
+          gh release create v0.7.0-beta.1 "$RUNNER_TEMP/PistonPort-Android-DriverHub-arm64.apk" --target "$SOURCE_SHA" --title "PistonPort Android v0.7.0 Beta 1" --notes-file "$RUNNER_TEMP/release-notes.md" --prerelease
