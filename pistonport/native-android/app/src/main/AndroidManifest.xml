@@ -12,6 +12,7 @@
         <activity android:name=".TouchLayoutActivity" android:exported="false"
             android:screenOrientation="sensorLandscape" />
         <activity android:name=".GameActivity" android:exported="false" android:process=":game"
+            android:enableOnBackInvokedCallback="false"
             android:screenOrientation="sensorLandscape"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|uiMode|locale|layoutDirection|fontScale|fontWeightAdjustment|density" />
     </application>

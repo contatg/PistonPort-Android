@@ -215,8 +215,8 @@ class HomeActivity : Activity() {
 
         val frame = card("Geração de quadros")
         graphicsChoice(frame, "Método", "framegen", 0, listOf(0 to "Desligado", 1 to "FSR 3.1 · 2×",
-            2 to "Bloodframe · 2×", 3 to "Bloodframe · 3×", 4 to "Bloodframe · 4×", 5 to "Mescla · 2×"))
-        graphicsChoice(frame, "Modelo Bloodframe", "fg_model", 0,
+            2 to "Pitframe · 2×", 3 to "Pitframe · 3×", 4 to "Pitframe · 4×", 5 to "Mescla · 2×"))
+        graphicsChoice(frame, "Modelo Pitframe", "fg_model", 0,
             listOf(0 to "Lossless Scaling", 1 to "MAKO-FG experimental"))
         graphicsSlider(frame, "Escala de movimento", "fg_flow", 25, 100, 75)
         graphicsToggle(frame, "Modo desempenho", "fg_fast", true)
@@ -430,7 +430,7 @@ class HomeActivity : Activity() {
             val mako = settings.choice("fg_model", 0) == 1
             val ready = if (mako) FrameGenAssets.makoInstalled(profile) else FrameGenAssets.lossless(profile).isFile
             if (!ready) {
-                panelDialog(card("Bloodframe").apply {
+                panelDialog(card("Pitframe").apply {
                     addView(PortStyle.text(this@HomeActivity,
                         if (mako) "Baixe MAKO-FG em Gráficos → Geração de quadros."
                         else "Importe sua Lossless.dll em Gráficos → Geração de quadros.", 15f, PortStyle.muted))

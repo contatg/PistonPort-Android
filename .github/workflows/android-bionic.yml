@@ -201,7 +201,7 @@ jobs:
           grep -E 'GLOBAL.*DEFAULT +[0-9]+ Java_org_pistonport_nativeandroid_GameActivity_updateTouch$' "$RUNNER_TEMP/piston-symbols"
           grep -E 'GLOBAL.*DEFAULT +[0-9]+ Java_org_pistonport_nativeandroid_GameActivity_setLiveGraphics$' "$RUNNER_TEMP/piston-symbols"
           grep -E 'GLOBAL.*DEFAULT +[0-9]+ Java_org_pistonport_nativeandroid_GameActivity_upscalerStatus$' "$RUNNER_TEMP/piston-symbols"
-          grep -E 'GLOBAL.*DEFAULT +[0-9]+ Java_org_pistonport_nativeandroid_GameActivity_bloodframeStatus$' "$RUNNER_TEMP/piston-symbols"
+          grep -E 'GLOBAL.*DEFAULT +[0-9]+ Java_org_pistonport_nativeandroid_GameActivity_pitframeStatus$' "$RUNNER_TEMP/piston-symbols"
           for library in "$staging"/*.so; do
             "$llvm/bin/llvm-readelf" -h "$library" | grep -E 'Machine: +AArch64'
             "$llvm/bin/llvm-readelf" -d "$library" > "$RUNNER_TEMP/elf-deps"

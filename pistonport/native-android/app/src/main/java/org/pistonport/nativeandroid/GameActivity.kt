@@ -8,6 +8,9 @@ import android.system.Os
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
+import android.view.WindowManager
 import android.widget.FrameLayout
 import java.io.File
 import org.libsdl.app.SDLActivity
@@ -54,6 +57,8 @@ class GameActivity : SDLActivity() {
         configureGraphics(profile)
         super.onCreate(state)
         if (mBrokenLibraries) return
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        enterImmersiveMode()
         raceSettings = RaceSettingsPanel.State(
             state?.getInt("race_framegen") ?: intent.getIntExtra("framegen", 0),
             state?.getInt("race_upscaler") ?: intent.getIntExtra("upscaler", 0),
@@ -76,7 +81,7 @@ class GameActivity : SDLActivity() {
         val panel = RaceSettingsPanel(this, raceSettings, hasMako, hasLossless,
             onGraphics = ::applyRaceGraphics, onOverlay = { updateRaceOverlays() },
             onEditControls = ::editRaceControls,
-            nativeStatus = ::bloodframeStatus, upscalerStatus = ::upscalerStatus)
+            nativeStatus = ::pitframeStatus, upscalerStatus = ::upscalerStatus)
         racePanel = panel
         addContentView(panel, FrameLayout.LayoutParams(-1, -1))
         val decor = window.decorView
@@ -144,8 +149,11 @@ class GameActivity : SDLActivity() {
     }
 
     private fun updateRaceOverlays() {
-        hud?.visibility = if (raceSettings.touch) View.VISIBLE else View.GONE
-        if (!raceSettings.touch) hud?.release()
+        hud?.let { controls ->
+            val visible = raceSettings.touch || controls.isEditing()
+            controls.visibility = if (visible) View.VISIBLE else View.GONE
+            if (!visible) controls.release()
+        }
         performance?.visibility = if (raceSettings.fps) View.VISIBLE else View.GONE
         if (raceSettings.fps && resumed) performance?.start() else performance?.stop()
     }
@@ -170,18 +178,34 @@ class GameActivity : SDLActivity() {
         super.onSaveInstanceState(state)
     }
 
-    @Deprecated("The game uses the Android back button to close the panel or control editor.")
+    @Deprecated("The game uses legacy Back dispatch to close its overlays.")
     override fun onBackPressed() {
+        if (mBrokenLibraries) {
+            finish()
+            return
+        }
         val controls = hud
         when {
             controls?.isEditing() == true -> controls.finishEdit()
             racePanel?.visibility == View.VISIBLE -> racePanel?.visibility = View.GONE
-            else -> super.onBackPressed()
+        }
+        enterImmersiveMode()
+    }
+
+    private fun enterImmersiveMode() {
+        window.insetsController?.apply {
+            systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsets.Type.systemBars())
         }
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && !mBrokenLibraries) enterImmersiveMode()
+    }
+
     private external fun setLiveGraphics(framegen: Int, upscaler: Int, model: Int)
-    private external fun bloodframeStatus(): Int
+    private external fun pitframeStatus(): Int
     private external fun upscalerStatus(): Int
 
     private fun configureGraphics(profile: File) {

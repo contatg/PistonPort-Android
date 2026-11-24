@@ -1139,7 +1139,7 @@ index 0000000..bbb9310
 +
 +} // namespace Vulkan
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
-index 10565e9..c18563c 100644
+index 10565e9..a58dc52 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp
 @@ -3,2 +3,3 @@
@@ -1163,36 +1163,36 @@ index 10565e9..c18563c 100644
 @@ -312,2 +321,15 @@ bool Instance::CreateDevice() {
      // Required
 +#ifdef __ANDROID__
-+    const std::array bloodframe_required{
++    const std::array pitframe_required{
 +        VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
 +        VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
 +        VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
 +    };
-+    bloodframe_extensions = std::ranges::all_of(bloodframe_required, [&](const char* extension) {
++    pitframe_extensions = std::ranges::all_of(pitframe_required, [&](const char* extension) {
 +        return std::find(available_extensions.begin(), available_extensions.end(), extension) != available_extensions.end();
 +    });
-+    if (bloodframe_extensions) {
-+        for (const char* extension : bloodframe_required) add_extension(extension);
++    if (pitframe_extensions) {
++        for (const char* extension : pitframe_required) add_extension(extension);
 +    }
 +#endif
      ASSERT_MSG(add_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME),
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_instance.h b/gpu/shadps4/video_core/renderer_vulkan/vk_instance.h
-index 5325169..85f2c87 100644
+index 5325169..fb1b5f7 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_instance.h
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_instance.h
 @@ -96,2 +96,9 @@ public:
      /// Retrieve queue information
 +#ifdef __ANDROID__
-+    bool SupportsBloodframe() const { return bloodframe_extensions; }
++    bool SupportsPitframe() const { return pitframe_extensions; }
 +private:
-+    bool bloodframe_extensions = false;
++    bool pitframe_extensions = false;
 +public:
 +#endif
 +
      u32 GetGraphicsQueueFamilyIndex() const {
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp
 new file mode 100644
-index 0000000..8721fa7
+index 0000000..05280ba
 --- /dev/null
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp
 @@ -0,0 +1,771 @@
@@ -1402,7 +1402,7 @@ index 0000000..8721fa7
 +    }
 +    load(api->init_v2, "bb_lsfg_init_v2"); // optional: Bloodframe 1.x has only bb_lsfg_init
 +    if (mako && !api->init_v2) {
-+        return fail(lib_path + " is older than Bloodframe 2.0 (no bb_lsfg_init_v2): MAKO-FG needs 2.0");
++        return fail(lib_path + " does not support the Pitframe MAKO-FG backend (missing bb_lsfg_init_v2)");
 +    }
 +
 +    BbLsfgConfig config{};
@@ -1449,7 +1449,7 @@ index 0000000..8721fa7
 +    }
 +    char diagnostics[768] = {};
 +    api->diagnostics(diagnostics, sizeof diagnostics);
-+    std::printf("Bloodframe: %s x%u, flow scale %.2f, %s model, %s images, %s sync, started in %.0f ms; %s\n",
++    std::printf("Pitframe: %s x%u, flow scale %.2f, %s model, %s images, %s sync, started in %.0f ms; %s\n",
 +                mako ? "MAKO-FG (experimental)" : "Lossless Scaling", multiplier, static_cast<double>(config.flow_scale),
 +                config.performance ? "performance" : "quality",
 +                shared_format == FormatRgba8 ? "RGBA8" : "RGBA16F", sync_host ? "CPU" : "sync-file",
@@ -1508,19 +1508,19 @@ index 0000000..8721fa7
 +    switch (set) {
 +    case BB_LSFG_SET_FP16_SPIRV:
 +        shader_set_name = "FP16";
-+        std::printf("Bloodframe: shaders FP16 SPIR-V (%s)\n", reason);
++        std::printf("Pitframe: shaders FP16 SPIR-V (%s)\n", reason);
 +        break;
 +    case BB_LSFG_SET_FP32_SPIRV:
 +        shader_set_name = "FP32";
-+        std::printf("Bloodframe: shaders FP32 SPIR-V (%s)\n", reason);
++        std::printf("Pitframe: shaders FP32 SPIR-V (%s)\n", reason);
 +        break;
 +    case BB_LSFG_SET_MAKO_EXPERIMENTAL:
 +        shader_set_name = "MAKO-FG";
-+        std::printf("Bloodframe: MAKO-FG V1.24 blend, Bloodframe motion (%s)\n", reason);
++        std::printf("Pitframe: MAKO-FG V1.24 blend, motion estimation (%s)\n", reason);
 +        break;
 +    default:
 +        shader_set_name = "FP32-DXBC";
-+        std::printf("Bloodframe: shaders DXBC (translated) (%s)\n", reason);
++        std::printf("Pitframe: shaders DXBC (translated) (%s)\n", reason);
 +        break;
 +    }
 +    std::fflush(stdout);
@@ -2162,7 +2162,7 @@ index 472be23..48d7718 100644
 +#endif
 
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
-index 4f29b10..7aca916 100644
+index 4f29b10..08f2c5d 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
 @@ -50,2 +50,9 @@
@@ -2170,7 +2170,7 @@ index 4f29b10..7aca916 100644
 +#ifdef __ANDROID__
 +extern "C" void piston_frame_presented(bool real);
 +extern "C" int piston_live_graphics(void);
-+extern "C" void piston_report_bloodframe(int status);
++extern "C" void piston_report_pitframe(int status);
 +extern "C" void piston_report_upscaler(int status);
 +#endif
 +
@@ -2379,48 +2379,48 @@ index 4f29b10..7aca916 100644
 +    return blended;
 +}
 +
-+void Presenter::PresentBloodframe(Frame* frame) {
++void Presenter::PresentPitframe(Frame* frame) {
 +    static const auto initial = BbLsfgState::Initial();
 +    const int live = piston_live_graphics();
 +    const int mode = live >= 0 ? live & 7 : static_cast<int>(initial.multiplier);
 +    const bool mako = live >= 0 ? (live & 64) != 0 : initial.model == BbLsfgState::Model::Mako;
 +    const int request = mode >= 2 && mode <= 4 ? mode | (mako ? 64 : 0) : 0;
-+    if (request != bloodframe_request) {
-+        bloodframe_request = request;
-+        bloodframe.reset();
++    if (request != pitframe_request) {
++        pitframe_request = request;
++        pitframe.reset();
 +        if (request == 0) {
-+            piston_report_bloodframe(0);
-+        } else if (!instance.SupportsBloodframe()) {
-+            piston_report_bloodframe(-2);
-+            LOG_WARNING(Render_Vulkan, "Bloodframe: driver lacks AHardwareBuffer or sync-fd support");
++            piston_report_pitframe(0);
++        } else if (!instance.SupportsPitframe()) {
++            piston_report_pitframe(-2);
++            LOG_WARNING(Render_Vulkan, "Pitframe: driver lacks AHardwareBuffer or sync-fd support");
 +        } else {
 +            auto settings = initial;
 +            settings.multiplier = static_cast<unsigned>(mode);
 +            settings.model = mako ? BbLsfgState::Model::Mako : BbLsfgState::Model::Lsfg;
-+            bloodframe = Lsfg::Create(instance, settings);
-+            piston_report_bloodframe(bloodframe ? 1 : -1);
++            pitframe = Lsfg::Create(instance, settings);
++            piston_report_pitframe(pitframe ? 1 : -1);
 +        }
 +    }
-+    if (!bloodframe) {
++    if (!pitframe) {
 +        return;
 +    }
-+    const int generated = bloodframe->ProcessFrame(present_scheduler, frame->image,
++    const int generated = pitframe->ProcessFrame(present_scheduler, frame->image,
 +        frame->width, frame->height, frame->ready_semaphore, frame->ready_tick);
 +    if (generated < 0) {
-+        piston_report_bloodframe(-1);
-+        bloodframe.reset();
++        piston_report_pitframe(-1);
++        pitframe.reset();
 +        return;
 +    }
 +    using Clock = std::chrono::steady_clock;
 +    const auto spacing = std::chrono::microseconds{static_cast<s64>(
-+        1000 * std::clamp(bloodframe->FrameIntervalMs() / (generated + 1), 2.0, 60.0))};
++        1000 * std::clamp(pitframe->FrameIntervalMs() / (generated + 1), 2.0, 60.0))};
 +    const auto start = Clock::now();
 +    for (int i = 0; i < generated; ++i) {
-+        if (!PresentGeneratedImage(bloodframe->GetOutput(i), frame->width, frame->height, i)) {
++        if (!PresentGeneratedImage(pitframe->GetOutput(i), frame->width, frame->height, i)) {
 +            return;
 +        }
-+        piston_report_bloodframe(2);
-+        if (bloodframe->Paced()) {
++        piston_report_pitframe(2);
++        if (pitframe->Paced()) {
 +            std::this_thread::sleep_until(start + spacing * (i + 1));
 +        }
 +    }
@@ -2433,7 +2433,7 @@ index 4f29b10..7aca916 100644
 +    }
 +    if (output.done) {
 +        const auto result = instance.GetDevice().resetFences(output.done);
-+        ASSERT_MSG(result == vk::Result::eSuccess, "Bloodframe: output fence reset failed");
++        ASSERT_MSG(result == vk::Result::eSuccess, "Pitframe: output fence reset failed");
 +    }
 +
 +    auto& scheduler = present_scheduler;
@@ -2487,7 +2487,7 @@ index 4f29b10..7aca916 100644
 +    info.AddSignal(swapchain.GetPresentReadySemaphore());
 +    const u64 tick = scheduler.CurrentTick();
 +    scheduler.Flush(info);
-+    bloodframe->OutputSubmitted(index, tick);
++    pitframe->OutputSubmitted(index, tick);
 +    std::scoped_lock submit_lock{Scheduler::submit_mutex};
 +    if (!swapchain.Present()) {
 +        return false;
@@ -2508,7 +2508,7 @@ index 4f29b10..7aca916 100644
 
 +#ifdef __ANDROID__
 +    if (!generated && is_game_frame && !is_reusing_frame && !frame->is_hdr) {
-+        PresentBloodframe(frame);
++        PresentPitframe(frame);
 +    }
 +#endif
      const auto acquire_start = profile ? Clock::now() : Clock::time_point{};
@@ -2592,7 +2592,7 @@ index 4f29b10..7aca916 100644
 +#endif
      const float ratio = (float)width / (float)height;
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h
-index 212581e..9eb474e 100644
+index 212581e..aba87e1 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h
 @@ -14,2 +14,5 @@
@@ -2616,10 +2616,10 @@ index 212581e..9eb474e 100644
 +    vk::Format blend_format{};
 +    bool blend_history_valid = false;
 +
-+    void PresentBloodframe(Frame* frame);
++    void PresentPitframe(Frame* frame);
 +    bool PresentGeneratedImage(const Lsfg::Output& output, u32 width, u32 height, u32 index);
-+    std::unique_ptr<Lsfg> bloodframe;
-+    int bloodframe_request = -1;
++    std::unique_ptr<Lsfg> pitframe;
++    int pitframe_request = -1;
 +#endif
      Scheduler flip_scheduler;
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_swapchain.cpp
@@ -3101,7 +3101,7 @@ index a40c4f2..ea5e1b6 100644
  #endif
 diff --git a/src/android_vulkan.c b/src/android_vulkan.c
 new file mode 100644
-index 0000000..a42b030
+index 0000000..8e94ad3
 --- /dev/null
 +++ b/src/android_vulkan.c
 @@ -0,0 +1,213 @@
@@ -3139,7 +3139,7 @@ index 0000000..a42b030
 +
 +// A single snapshot keeps the framegen method, upscaler and model in sync.
 +static atomic_int live_graphics = -1;
-+static atomic_int bloodframe_status;
++static atomic_int pitframe_status;
 +static atomic_int upscaler_status;
 +
 +void piston_report_upscaler(int status) {
@@ -3157,8 +3157,8 @@ index 0000000..a42b030
 +    return atomic_load_explicit(&live_graphics, memory_order_relaxed);
 +}
 +
-+void piston_report_bloodframe(int status) {
-+    atomic_store_explicit(&bloodframe_status, status, memory_order_relaxed);
++void piston_report_pitframe(int status) {
++    atomic_store_explicit(&pitframe_status, status, memory_order_relaxed);
 +}
 +
 +JNIEXPORT void JNICALL
@@ -3173,10 +3173,10 @@ index 0000000..a42b030
 +}
 +
 +JNIEXPORT jint JNICALL
-+Java_org_pistonport_nativeandroid_GameActivity_bloodframeStatus(JNIEnv *env, jobject activity) {
++Java_org_pistonport_nativeandroid_GameActivity_pitframeStatus(JNIEnv *env, jobject activity) {
 +    (void)env;
 +    (void)activity;
-+    return atomic_load_explicit(&bloodframe_status, memory_order_relaxed);
++    return atomic_load_explicit(&pitframe_status, memory_order_relaxed);
 +}
 +
 +static void init_loader(void) {
