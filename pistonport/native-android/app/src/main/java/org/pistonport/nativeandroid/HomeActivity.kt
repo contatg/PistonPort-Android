@@ -78,6 +78,7 @@ class HomeActivity : Activity() {
         creditsPage = scrollPage(pages, page().apply {
             addView(PortStyle.text(this@HomeActivity, getString(R.string.credits_tab), 31f, bold = true))
             append(this, card("contatg").apply {
+                addView(PortStyle.text(this@HomeActivity, "GitHub · @contatg", 15f, PortStyle.muted))
                 addView(PortStyle.text(this@HomeActivity, getString(R.string.project_about), 15f, PortStyle.muted))
                 append(this, button(getString(R.string.project_github)) {
                     openRelease("https://github.com/contatg/PistonPort-Android")
@@ -542,7 +543,7 @@ class HomeActivity : Activity() {
     private fun showHardwareNotice(manual: Boolean = false) {
         val info = gpuInfo ?: return
         if ((!manual && settings.hardwareNoticeAcknowledged) || !resumed ||
-            !hasWindowFocus() || isFinishing || isDestroyed || hardwareNotice != null) return
+            isFinishing || isDestroyed || hardwareNotice != null) return
         val sources = DriverCatalog.sourcesFor(info)
         val content = card(if (info.stockReady) getString(R.string.vulkan_available) else getString(R.string.vulkan_compatibility))
         val kind = info.driverKind
@@ -554,7 +555,7 @@ class HomeActivity : Activity() {
         val dialog = panelDialog(content)
         hardwareNotice = dialog
         dialog.setOnDismissListener { hardwareNotice = null }
-        dialog.setOnCancelListener { settings.hardwareNoticeAcknowledged = true }
+        dialog.setOnCancelListener { if (!manual) settings.hardwareNoticeAcknowledged = true }
         if (kind != null && sources.isNotEmpty() && (suggestPanvk || !info.stockReady)) {
             append(content, button(getString(R.string.open_kind_hub, kind.label), primary = true) {
                 settings.hardwareNoticeAcknowledged = true
@@ -567,6 +568,7 @@ class HomeActivity : Activity() {
             dialog.dismiss()
         })
         dialog.show()
+        if (!manual) settings.hardwareNoticeAcknowledged = true
     }
 
     private fun panelDialog(content: View): AlertDialog =
