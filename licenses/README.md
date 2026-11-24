@@ -62,12 +62,22 @@ O Hub consulta distribuições de Mesa Turnip e PanVK. Créditos à [comunidade 
 - [gow3-zFitness](upstream/gow3-zFitness.txt) — [origem](https://github.com/zFitness/gow3_android/blob/56e804d1ef3e108257b94c51b6f7fb204930a244/LICENSE)
 - [gow3-niilo](upstream/gow3-niilo.txt) — [origem](https://github.com/niilo/gow3_android/blob/046791de0fd4639b0b479afe8fc7ec67e538925d/LICENSE)
 - [Bloodborne-Android](upstream/Bloodborne-Android.txt) — [origem](https://github.com/ducvd89/Bloodborne-Android/blob/1600cc0/LICENSE)
-- Bloodframe — [texto upstream](https://github.com/ducvd89/bloodframe/blob/f4ac713aef58d9403a136e179b3b0d163d85eb66/LICENSE); cópia local não verificada nesta revisão.
+
 - [libadrenotools](upstream/libadrenotools.txt) — [origem](https://github.com/bylaws/libadrenotools/blob/8fae8ce254dfc1344527e05301e43f37dea2df80/LICENSE)
 - [SDL3](upstream/SDL3.txt) — [origem](https://github.com/libsdl-org/SDL/blob/release-3.2.10/LICENSE.txt)
 - [VulkanMemoryAllocator](upstream/VulkanMemoryAllocator.txt) — [origem](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/blob/v3.3.0/LICENSE.txt)
 - [Rune](upstream/Rune.txt) — [origem](https://github.com/anomalyco/rune/blob/f05046ac10fc124f9314c3ee6dc2434e2e6e2752/LICENSE)
 - [FEXDroid](upstream/FEXDroid.txt) — [origem](https://github.com/cobrabm12/fexdroid/blob/410bba28cf2f55e08fd9588266524106387ea67c/LICENSE)
+
+- [Bloodframe](upstream/Bloodframe.txt) — [origem](https://github.com/ducvd89/bloodframe/blob/f4ac713aef58d9403a136e179b3b0d163d85eb66/LICENSE.md)
+- [Bloodframe-framegen](upstream/Bloodframe-framegen.txt) — [origem](https://github.com/ducvd89/bloodframe/blob/f4ac713aef58d9403a136e179b3b0d163d85eb66/framegen/LICENSE.md)
+- [Bloodframe-dxbc](upstream/Bloodframe-dxbc.txt) — [origem](https://github.com/ducvd89/bloodframe/blob/f4ac713aef58d9403a136e179b3b0d163d85eb66/thirdparty/dxbc/LICENSE.md)
+- [Dear-ImGui](upstream/Dear-ImGui.txt) — [origem](https://github.com/ocornut/imgui/blob/f1cc2ae15e53a861a874c3034aae6798fde194ab/LICENSE.txt)
+- [magic_enum](upstream/magic_enum.txt) — [origem](https://github.com/Neargye/magic_enum/blob/e046b69a3736d314fad813e159b1c192eaef92cd/LICENSE)
+- [miniz](upstream/miniz.txt) — [origem](https://github.com/richgel999/miniz/blob/2948eebafc5b9f1c69bebed80333e403a09bd62d/LICENSE)
+- [Xbyak](upstream/Xbyak.txt) — [origem](https://github.com/herumi/xbyak/blob/cd6bad3cad2e07a3e277c23d2b1f065320024717/COPYRIGHT)
+- [LibAtrac9](upstream/LibAtrac9.txt) — [origem](https://github.com/Thealexbarney/LibAtrac9/blob/efca2e3af35562a09a9bb6deed90e45b4b824dc4/LICENSE)
+- [FEX](upstream/FEX.txt) — [origem](https://github.com/FEX-Emu/FEX/blob/fb925d6fc5cc8576bf0f9ae6978fc6d912485593/LICENSE)
 
 Os textos já existentes na árvore permanecem nos caminhos indicados nas tabelas. As licenças de dependências transitivas, de bibliotecas baixadas durante o build e dos binários externos devem ser verificadas na revisão e na configuração efetivamente distribuídas; este inventário não constitui certificação de conformidade. Antes de distribuir APKs derivados de GPL, disponibilize o código-fonte correspondente completo e os scripts de build nos termos aplicáveis, inclusive para componentes derivados. A distribuição do APK não autoriza distribuir arquivos do jogo ou modelos proprietários.
 
