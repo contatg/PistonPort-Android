@@ -7,8 +7,8 @@ import android.os.Build
 internal class PortSettings(context: Context) {
     private val values = context.getSharedPreferences("port-ui", Context.MODE_PRIVATE)
     var hardwareNoticeAcknowledged: Boolean
-        get() = values.getBoolean("driver_compatibility_acknowledged", false)
-        set(value) { values.edit().putBoolean("driver_compatibility_acknowledged", value).apply() }
+        get() = values.getBoolean("driver_compatibility_acknowledged_v2", false)
+        set(value) { values.edit().putBoolean("driver_compatibility_acknowledged_v2", value).apply() }
 
     var liteMode: Boolean
         get() = values.getBoolean("lite_mode", Build.SOC_MODEL.contains("SM6225", ignoreCase = true) ||
