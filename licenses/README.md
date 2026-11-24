@@ -51,6 +51,24 @@ A licença principal é a [GNU GPL v2](../LICENSE). O arquivo [pistonport/LICENS
 | [Android SDK/NDK](https://developer.android.com/ndk), [LLVM/libc++](https://llvm.org/), [Kotlin](https://kotlinlang.org/), [Gradle](https://gradle.org/), [Rust](https://www.rust-lang.org/) | Ferramentas de build e bibliotecas de runtime; termos próprios |
 | orbis-pkg/orbis-pfs, pkgextract | Ferramentas do fluxo Windows; consultar instruções de build e licenças da origem utilizada |
 
+## Dependências adicionais identificadas nos manifestos
+
+| Componente / autores | Uso e referência de licença |
+| --- | --- |
+| [xxHash — Yann Collet e colaboradores](https://github.com/Cyan4973/xxHash) | Hashing no backend GPU; BSD-2-Clause para a biblioteca, conferir revisão |
+| [X.Org / libX11](https://gitlab.freedesktop.org/xorg/lib/libx11) | Backend não Windows conforme CMake; avisos em COPYING upstream |
+| [glslang — Khronos Group e colaboradores](https://github.com/KhronosGroup/glslang) | Compilação de shaders; termos no LICENSE upstream |
+| [CMake — Kitware e colaboradores](https://cmake.org/) / [pkg-config](https://www.freedesktop.org/wiki/Software/pkg-config/) | Ferramentas de configuração de build; termos próprios |
+| [fs2](https://crates.io/crates/fs2), [image](https://crates.io/crates/image), [rfd](https://crates.io/crates/rfd), [tempfile](https://crates.io/crates/tempfile) | Dependências diretas do launcher Rust original; licenças nas versões resolvidas |
+| [windows-sys](https://crates.io/crates/windows-sys), [winresource](https://crates.io/crates/winresource) | Integração e build Windows; não presumir inclusão no APK |
+| [Rune Kit](https://github.com/anomalyco/rune), [wgpu-hal](https://crates.io/crates/wgpu-hal), [winit](https://crates.io/crates/winit), [sctk-adwaita](https://crates.io/crates/sctk-adwaita), [parley_engine](https://github.com/anomalyco/rune), [AccessKit](https://github.com/AccessKit/accesskit) | Dependências e patches do launcher Rune na revisão indicada acima; preservar avisos de cada projeto |
+| [aes](https://crates.io/crates/aes), [cbc](https://crates.io/crates/cbc), [anyhow](https://crates.io/crates/anyhow), [memmap2](https://crates.io/crates/memmap2), [roxmltree](https://crates.io/crates/roxmltree), [self_cell](https://crates.io/crates/self_cell) | Dependências diretas do leitor PKG Rust; consultar licenças das versões resolvidas |
+| [orbis-pkg](https://crates.io/crates/orbis-pkg), [orbis-pfs](https://crates.io/crates/orbis-pfs) | Leitor PKG original, versão 0.1.0; consultar avisos dos pacotes |
+
+Fontes deste inventário: [CMake GPU](../gpu/CMakeLists.txt), [manifesto do launcher](../launcher-rust/pistonport/Cargo.toml), [manifesto PKG](../pistonport/pkg/Cargo.toml), [submódulos](../.gitmodules) e [Gradle Android](../pistonport/native-android/app/build.gradle.kts). Os manifestos Rust declaram GPL-2.0-or-later para os próprios pacotes. Isso não altera as licenças de terceiros.
+
+Antes de cada release, conferir dependências transitivas resolvidas, avisos dos binários efetivamente empacotados, licenças dos submódulos e disponibilidade do código-fonte correspondente aos destinatários. Um link upstream não substitui a inclusão do texto de licença quando exigida.
+
 ## Drivers opcionais
 
 O Hub consulta distribuições de Mesa Turnip e PanVK. Créditos à [comunidade Mesa](https://mesa3d.org/) e aos mantenedores dos pacotes: [StevenMXZ](https://github.com/StevenMXZ/Adreno-Tools-Drivers), [MrPurple666](https://github.com/MrPurple666/purple-turnip), [K11MCH1](https://github.com/K11MCH1/AdrenoToolsDrivers), [The412Banner](https://github.com/The412Banner/Banners-Turnip), [zenithblue-oss](https://github.com/zenithblue-oss/panvk-kbase-android), [JimVulkan](https://github.com/JimVulkan/mali-panvk), [MineGraph-bilibili](https://github.com/MineGraph-bilibili/panvk-Android), [soulexit](https://github.com/soulexit/panvk-bifrost-soulexit) e [FristOneRR](https://github.com/FristOneRR/FristOneRR-Panvk-Driver). Os pacotes são baixados separadamente e sujeitos aos termos e avisos de cada publicação.
