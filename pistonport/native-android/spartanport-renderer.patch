@@ -2093,7 +2093,7 @@ index 472be23..48d7718 100644
 +#endif
 
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
-index 4f29b10..6017584 100644
+index 4f29b10..5631760 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
 @@ -50,2 +50,8 @@
@@ -2105,8 +2105,17 @@ index 4f29b10..6017584 100644
 +#endif
 +
  namespace Vulkan {
-@@ -108,2 +114,13 @@ static vk::Rect2D FitImage(s32 frame_width, s32 frame_height, s32 swapchain_widt
-     float frame_aspect = static_cast<float>(frame_width) / frame_height;
+@@ -107,12 +113,24 @@ static vk::Rect2D FitImage(s32 frame_width, s32 frame_height, s32 swapchain_widt
+                            s32 swapchain_height) {
+-    float frame_aspect = static_cast<float>(frame_width) / frame_height;
+-    float swapchain_aspect = static_cast<float>(swapchain_width) / swapchain_height;
+-
++    const float frame_aspect = static_cast<float>(frame_width) / frame_height;
+     u32 dst_width = swapchain_width;
+     u32 dst_height = swapchain_height;
+-
+-    if (frame_aspect > swapchain_aspect) {
+-        dst_height = static_cast<s32>(swapchain_width / frame_aspect);
 +#ifdef __ANDROID__
 +    static const float override_aspect = [] {
 +        if (const char* value = std::getenv("PISTON_ASPECT")) {
@@ -2115,17 +2124,58 @@ index 4f29b10..6017584 100644
 +        return 0.0f;
 +    }();
 +    if (override_aspect >= 1.0f && override_aspect <= 4.0f) {
-+        frame_aspect = override_aspect;
++        if (static_cast<float>(dst_width) / dst_height > override_aspect) {
++            dst_width = static_cast<u32>(dst_height * override_aspect);
++        } else {
++            dst_height = static_cast<u32>(dst_width / override_aspect);
++        }
 +    }
 +#endif
-     float swapchain_aspect = static_cast<float>(swapchain_width) / swapchain_height;
-@@ -308,2 +325,5 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
++    if (frame_aspect > static_cast<float>(dst_width) / dst_height) {
++        dst_height = static_cast<u32>(dst_width / frame_aspect);
+     } else {
+-        dst_width = static_cast<s32>(swapchain_height * frame_aspect);
++        dst_width = static_cast<u32>(dst_height * frame_aspect);
+     }
+@@ -308,2 +326,5 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
      const u32 num_images = swapchain.GetImageCount();
 +#ifdef __ANDROID__
 +    SetExpectedGameSize(swapchain.GetWidth(), swapchain.GetHeight());
 +#endif
      const vk::Device device = instance.GetDevice();
-@@ -880,2 +900,121 @@ void Presenter::PresentLoadingFrame() {
+@@ -570,3 +591,20 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup&
+
++#ifdef __ANDROID__
++    // Size the intermediate from the frame being drawn, before recording any
++    // work into it. The presentation thread only letterboxes the finished image.
++    const u32 source_width = upscaled ? display.width : attribute.attrib.width;
++    const u32 source_height = upscaled ? display.height : attribute.attrib.height;
++    static const bool potato = std::getenv("PISTON_PRESENT_HEIGHT") != nullptr;
++    const s32 window_width = window.GetWidth();
++    const s32 window_height = window.GetHeight();
++    u32 height = potato ? std::min(source_height, 360u) : source_height;
++    if (source_width && window_width > 0 && window_height > 0) {
++        const u32 height_at_window_width = static_cast<u32>(u64(window_width) * source_height / source_width);
++        height = std::min({height, static_cast<u32>(window_height), height_at_window_width});
++    }
++    const u32 width = source_height ? static_cast<u32>(u64(source_width) * height / source_height) : 0;
++    Frame* frame = GetRenderFrame(width, height);
++#else
+     Frame* frame = GetRenderFrame();
++#endif
+     frame->is_generated = false;
+@@ -650,3 +688,5 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup&
+     }
++#ifndef __ANDROID__
+     expected_ratio = static_cast<float>(image_size.width) / static_cast<float>(image_size.height);
++#endif
+
+@@ -678,3 +718,3 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup&
+         // The same passes over the generated frame, into a frame of its own.
+-        Frame* generated = GetRenderFrame();
++        Frame* generated = GetRenderFrame(frame->width, frame->height);
+         const auto generated_barrier = vk::ImageMemoryBarrier2{
+@@ -880,2 +920,121 @@ void Presenter::PresentLoadingFrame() {
 
 +#ifdef __ANDROID__
 +void Presenter::PresentBloodframe(Frame* frame) {
@@ -2247,13 +2297,13 @@ index 4f29b10..6017584 100644
 +#endif
 +
  void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame) {
-@@ -896,3 +1035,4 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+@@ -896,3 +1055,4 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
      // spartanport: frame generation: the generated frame first, the real one halfway to the next.
 -    if (Frame* generated = std::exchange(frame->generated, nullptr)) {
 +    Frame* generated = std::exchange(frame->generated, nullptr);
 +    if (generated) {
          Present(generated, false, false);
-@@ -928,2 +1068,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+@@ -928,2 +1088,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
 +#ifdef __ANDROID__
 +    if (!generated && is_game_frame && !is_reusing_frame && !frame->is_hdr) {
@@ -2261,7 +2311,13 @@ index 4f29b10..6017584 100644
 +    }
 +#endif
      const auto acquire_start = profile ? Clock::now() : Clock::time_point{};
-@@ -998,14 +1143,18 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+@@ -965,3 +1130,5 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+         const vk::Extent2D extent = swapchain.GetExtent();
++#ifndef __ANDROID__
+         SetExpectedGameSize(s32(extent.width), s32(extent.height));
++#endif
+         const vk::ImageSubresourceRange color_range{
+@@ -998,14 +1165,18 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                                 {}, {}, pre_barriers);
 -        const vk::ClearColorValue black{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
 -        cmdbuf.clearColorImage(swapchain_image, vk::ImageLayout::eTransferDstOptimal, black, color_range);
@@ -2291,7 +2347,7 @@ index 4f29b10..6017584 100644
 -                         vk::Filter::eLinear);
 +                         vk::ImageLayout::eTransferDstOptimal, region, vk::Filter::eLinear);
          if (VideoCore::ConsumeGameOnlyScreenshotRequests() != 0) {
-@@ -1100,3 +1249,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+@@ -1100,3 +1271,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
          std::scoped_lock submit_lock{Scheduler::submit_mutex};
 -        if (!swapchain.Present() && !window.IsMinimized() && window.GetWidth() > 0 &&
 +        const bool presented = swapchain.Present();
@@ -2302,7 +2358,24 @@ index 4f29b10..6017584 100644
 +#endif
 +        if (!presented && !window.IsMinimized() && window.GetWidth() > 0 &&
              window.GetHeight() > 0) {
-@@ -1211,2 +1366,14 @@ void Presenter::SetExpectedGameSize(s32 width, s32 height) {
+@@ -1146,3 +1323,3 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
+
+-Frame* Presenter::GetRenderFrame() {
++Frame* Presenter::GetRenderFrame(u32 width, u32 height) {
+     using Clock = std::chrono::steady_clock;
+@@ -1199,5 +1376,8 @@ Frame* Presenter::GetRenderFrame() {
+     }
+-    if (frame->width != expected_frame_width || frame->height != expected_frame_height ||
+-        frame->is_hdr != swapchain.GetHDR()) {
+-        RecreateFrame(frame, expected_frame_width, expected_frame_height);
++    if (!width || !height) {
++        width = expected_frame_width;
++        height = expected_frame_height;
++    }
++    if (frame->width != width || frame->height != height || frame->is_hdr != swapchain.GetHDR()) {
++        RecreateFrame(frame, width, height);
+     }
+@@ -1211,2 +1391,14 @@ void Presenter::SetExpectedGameSize(s32 width, s32 height) {
      }
 +#ifdef __ANDROID__
 +    // Keep the intermediate post-process buffer at the game's size in light mode.
@@ -2318,7 +2391,7 @@ index 4f29b10..6017584 100644
 +#endif
      const float ratio = (float)width / (float)height;
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h
-index 212581e..36783c6 100644
+index 212581e..0c858ce 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.h
 @@ -14,2 +14,5 @@
@@ -2327,6 +2400,11 @@ index 212581e..36783c6 100644
 +#include "video_core/renderer_vulkan/vk_lsfg.h"
 +#endif
  #include "video_core/renderer_vulkan/frame_generation_policy.h"
+@@ -111,3 +114,3 @@ public:
+ private:
+-    Frame* GetRenderFrame();
++    Frame* GetRenderFrame(u32 width = 0, u32 height = 0);
+
 @@ -132,2 +135,8 @@ private:
      Scheduler present_scheduler;
 +#ifdef __ANDROID__
@@ -2514,6 +2592,24 @@ index 495d892..c659a47 100644
 +#endif
 +    bool resources_gsr2 = false;
      std::unique_ptr<FrameGeneration> frame_generation;
+diff --git a/gpu/shadps4/video_core/texture_cache/image_info.cpp b/gpu/shadps4/video_core/texture_cache/image_info.cpp
+index b815326..497c9a4 100644
+--- a/gpu/shadps4/video_core/texture_cache/image_info.cpp
++++ b/gpu/shadps4/video_core/texture_cache/image_info.cpp
+@@ -3,2 +3,3 @@
+
++#include <algorithm>
+ #include "common/assert.h"
+@@ -47,3 +48,9 @@ ImageInfo::ImageInfo(const Libraries::VideoOut::BufferAttributeGroup& group,
+     size.height = attrib.height;
++#ifdef __ANDROID__
++    // VideoOut's stride can be wider than its visible width, especially for splash buffers.
++    const u32 registered_pitch = std::max<u32>(size.width, attrib.pitch_in_pixel);
++    pitch = props.is_tiled ? (registered_pitch + 127) & ~127u : registered_pitch;
++#else
+     pitch = attrib.tiling_mode == TilingMode::Linear ? size.width : (size.width + 127) & (~127);
++#endif
+     num_bits = attrib.pixel_format != VideoOutFormat::A16R16G16B16Float ? 32 : 64;
 diff --git a/gpu/shadps4/video_core/texture_cache/sampler.cpp b/gpu/shadps4/video_core/texture_cache/sampler.cpp
 index 968de34..ac79aa3 100644
 --- a/gpu/shadps4/video_core/texture_cache/sampler.cpp

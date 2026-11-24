@@ -163,6 +163,9 @@ class HomeActivity : Activity() {
     }
 
     private fun buildGraphics(): LinearLayout = column().apply {
+        addView(PortStyle.text(this@HomeActivity,
+            "Durante a corrida, deslize do meio da borda direita para dentro para abrir os ajustes.",
+            13f, PortStyle.muted))
         val rendering = card("Imagem e desempenho")
         append(rendering, Switch(this@HomeActivity).apply {
             text = "Modo Batata"
@@ -199,7 +202,7 @@ class HomeActivity : Activity() {
             isChecked = settings.performanceHud
             setOnCheckedChangeListener { _, checked -> settings.performanceHud = checked }
         })
-        addView(rendering)
+        append(this, rendering)
 
         val effects = card("Efeitos gráficos")
         graphicsToggle(effects, "Bloom", "bloom", true)

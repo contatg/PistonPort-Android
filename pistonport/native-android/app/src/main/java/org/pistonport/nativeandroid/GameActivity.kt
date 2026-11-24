@@ -1,12 +1,13 @@
 package org.pistonport.nativeandroid
 
 import android.content.Context
+import android.graphics.Rect
 import android.os.Bundle
 import android.os.Process
 import android.system.Os
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
-import android.widget.Button
 import android.widget.FrameLayout
 import java.io.File
 import org.libsdl.app.SDLActivity
@@ -16,6 +17,9 @@ class GameActivity : SDLActivity() {
     private var performance: PerformanceHud? = null
     private var racePanel: RaceSettingsPanel? = null
     private var resumed = false
+    private var edgeStartX = Float.NaN
+    private var edgeStartY = 0f
+    private var openingPanel = false
     private lateinit var raceSettings: RaceSettingsPanel.State
 
     override fun getLibraries() = arrayOf("SDL3", "pistonport")
@@ -69,24 +73,53 @@ class GameActivity : SDLActivity() {
             onGraphics = ::applyRaceGraphics, onOverlay = { updateRaceOverlays() },
             nativeStatus = ::bloodframeStatus)
         racePanel = panel
-        val open = Button(this).apply {
-            text = "⚙"
-            contentDescription = "Ajustes de corrida"
-            textSize = 19f
-            setPadding(0, 0, 0, 0)
-            setTextColor(PortStyle.text)
-            stateListAnimator = null
-            background = PortStyle.action(this@GameActivity, PortStyle.raised, 12, PortStyle.border)
-            setOnClickListener {
-                hud?.release()
-                panel.visibility = View.VISIBLE
-            }
-        }
-        addContentView(open, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
-            .apply { bottomMargin = dp(12) })
         addContentView(panel, FrameLayout.LayoutParams(-1, -1))
+        val decor = window.decorView
+        decor.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+            val center = view.height / 2
+            val halfHeight = minOf(center, dp(90))
+            view.systemGestureExclusionRects = listOf(
+                Rect((view.width - dp(24)).coerceAtLeast(0), center - halfHeight, view.width, center + halfHeight)
+            )
+        }
         updateRaceOverlays()
         applyRaceGraphics(raceSettings)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        val panel = racePanel ?: return super.dispatchTouchEvent(event)
+        val action = event.actionMasked
+        if (action == MotionEvent.ACTION_DOWN) {
+            val atEdge = event.x >= window.decorView.width - dp(24)
+            edgeStartX = if (atEdge && panel.visibility != View.VISIBLE) event.x else Float.NaN
+            edgeStartY = event.y
+            openingPanel = false
+        }
+        if (openingPanel) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) openingPanel = false
+            return true
+        }
+        if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_CANCEL ||
+            action == MotionEvent.ACTION_UP) {
+            edgeStartX = Float.NaN
+        }
+        if (action == MotionEvent.ACTION_MOVE && !edgeStartX.isNaN()) {
+            val horizontal = edgeStartX - event.x
+            val vertical = kotlin.math.abs(edgeStartY - event.y)
+            if (vertical > dp(32) && vertical > horizontal) edgeStartX = Float.NaN
+            if (horizontal >= dp(42) && horizontal >= vertical * 1.5f) {
+                val cancel = MotionEvent.obtain(event)
+                cancel.action = MotionEvent.ACTION_CANCEL
+                super.dispatchTouchEvent(cancel)
+                cancel.recycle()
+                hud?.release()
+                panel.visibility = View.VISIBLE
+                openingPanel = true
+                edgeStartX = Float.NaN
+                return true
+            }
+        }
+        return super.dispatchTouchEvent(event)
     }
 
     private fun applyRaceGraphics(state: RaceSettingsPanel.State) {
@@ -141,7 +174,8 @@ class GameActivity : SDLActivity() {
         val aspect = aspectRatios.getOrElse(number("aspect", 0)) { "auto" }
         val factors = aspect.split(':')
         val ratio = if (factors.size == 2) factors[0].toDouble() / factors[1].toDouble() else 16.0 / 9
-        val width = ((output * ratio / 2).toInt() * 2).coerceAtMost(3840)
+        // Android's selectable guest resolutions have a 16:9 picture.
+        val width = (output * 16 / 9) and -2
         val upscaler = when (number("upscaler", 0)) {
             1 -> "fsr3"
             2 -> "taa"
