@@ -18,6 +18,7 @@ internal class RaceSettingsPanel(
     private val hasLossless: Boolean,
     private val onGraphics: (State) -> Unit,
     private val onOverlay: (State) -> Unit,
+    onEditControls: () -> Unit,
     private val nativeStatus: () -> Int,
     private val upscalerStatus: () -> Int
 ) : FrameLayout(context) {
@@ -78,7 +79,10 @@ internal class RaceSettingsPanel(
         pane.addView(ScrollView(context).apply { addView(content) }, LinearLayout.LayoutParams(-1, 0, 1f))
 
         toggle(content, "Mostrar FPS e GPU", state.fps) { state.fps = it; onOverlay(state) }
+        section(content, "Controles")
         toggle(content, "Controles por toque", state.touch) { state.touch = it; onOverlay(state) }
+        content.addView(button("Editar controles") { onEditControls() },
+            LinearLayout.LayoutParams(-1, context.dp(44)))
         section(content, "Upscaler")
         options(content, listOf("Desligado", "FSR 3.1", "TAA", "GSR 2", "FSR 1"), 2, { state.upscaler }) {
             state.upscaler = it

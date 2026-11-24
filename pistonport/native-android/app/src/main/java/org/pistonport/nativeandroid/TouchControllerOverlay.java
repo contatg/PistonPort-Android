@@ -27,8 +27,8 @@ final class TouchControllerOverlay extends View {
         "up","left","right","down","triangle","circle","cross","square","leftstick"
     };
     private static final float[][] DEFAULT={
-        {100,590},{125,116},{640,75},{1145,116},{1170,598},
-        {224,104},{181,150},{267,150},{224,196},{1161,366},{1170,478},{1023,510},{1028,393},{205,470}
+        {332,565},{125,116},{640,75},{1145,116},{1170,598},
+        {224,104},{181,150},{267,150},{224,196},{1161,366},{1170,478},{1023,510},{1028,393},{160,535}
     };
     private final Path controlShape = new Path();
     private final Typeface lettering = Typeface.create("sans-serif-condensed", Typeface.BOLD);
@@ -80,7 +80,7 @@ final class TouchControllerOverlay extends View {
             float x=preferences.getFloat(key("overlay_x_",name,from),DEFAULT[i][0]);
             float y=preferences.getFloat(key("overlay_y_",name,from),DEFAULT[i][1]);
             centers.put(name,new PointF(x,y));
-            sizes.put(name,clampSize(preferences.getFloat(key("overlay_s_",name,from),1f)));
+            sizes.put(name,clampSize(preferences.getFloat(key("overlay_s_",name,from),defaultSize(name))));
             anchors.put(name,new int[]{preferences.getInt(key("overlay_ax_",name,from),anchorX(x)),
                                        preferences.getInt(key("overlay_ay_",name,from),anchorY(y))});
         }
@@ -143,7 +143,8 @@ final class TouchControllerOverlay extends View {
         p.set(Math.max(24-ex,Math.min(1256+ex,stored.x+shift(name))),Math.max(24-ey,Math.min(696+ey,stored.y+shiftY(name))));
         return p;
     }
-    private float size(String name) { Float s=sizes.get(name); return s==null ? 1f : s; }
+    private static float defaultSize(String name) { return stick(name) ? 1.25f : 1f; }
+    private float size(String name) { return sizes.getOrDefault(name,defaultSize(name)); }
     private static float clampSize(float s) { return Math.max(MIN_SIZE,Math.min(MAX_SIZE,s)); }
     // The 1280x720 layout drawn at one scale in the centred 16:9 area, as the game (MainActivity):
     // round on any screen shape. Controls may be dragged into the bars around it.
@@ -224,16 +225,19 @@ final class TouchControllerOverlay extends View {
     void edit(Runnable done) {
         release(); editing=true; selected=null; onEditDone=done; invalidate();
     }
-    private void finishEdit() {
+    boolean isEditing() { return editing; }
+    void finishEdit() {
         editPointer=pinchPointer=-1; dragged=selected=null; editing=false; invalidate();
-        if (onEditDone!=null) onEditDone.run();
+        Runnable done=onEditDone;
         onEditDone=null;
+        if (done!=null) done.run();
     }
     /** The default layout for this screen shape (saved as its own); before the overlay has a size, the shared one. */
     void resetLayout() {
         SharedPreferences.Editor editor=preferences.edit();
         for (int i=0;i<NAMES.length;i++) {
-            String name=NAMES[i]; centers.get(name).set(DEFAULT[i][0],DEFAULT[i][1]); sizes.put(name,1f);
+            String name=NAMES[i]; centers.get(name).set(DEFAULT[i][0],DEFAULT[i][1]);
+            sizes.put(name,defaultSize(name));
             anchors.put(name,new int[]{anchorX(DEFAULT[i][0]),anchorY(DEFAULT[i][1])});
             if (profile==null) editor.remove("overlay_x_"+name).remove("overlay_y_"+name).remove("overlay_s_"+name)
                                      .remove("overlay_ax_"+name).remove("overlay_ay_"+name);

@@ -15,8 +15,8 @@ android {
         minSdk = 33
         // The original PS4 files are accessed by path using the legacy read permission.
         targetSdk = 28
-        versionCode = 11
-        versionName = "0.6.5"
+        versionCode = 12
+        versionName = "0.6.6"
         ndk { abiFilters += "arm64-v8a" }
     }
     sourceSets["main"].java.srcDir(layout.buildDirectory.dir("sdl-java"))

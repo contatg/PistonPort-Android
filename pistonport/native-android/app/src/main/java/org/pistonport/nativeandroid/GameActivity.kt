@@ -72,6 +72,7 @@ class GameActivity : SDLActivity() {
         val hasLossless = FrameGenAssets.lossless(profile).isFile
         val panel = RaceSettingsPanel(this, raceSettings, hasMako, hasLossless,
             onGraphics = ::applyRaceGraphics, onOverlay = { updateRaceOverlays() },
+            onEditControls = ::editRaceControls,
             nativeStatus = ::bloodframeStatus, upscalerStatus = ::upscalerStatus)
         racePanel = panel
         addContentView(panel, FrameLayout.LayoutParams(-1, -1))
@@ -89,6 +90,7 @@ class GameActivity : SDLActivity() {
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (hud?.isEditing() == true) return super.dispatchTouchEvent(event)
         val panel = racePanel ?: return super.dispatchTouchEvent(event)
         val action = event.actionMasked
         if (action == MotionEvent.ACTION_DOWN) {
@@ -145,6 +147,15 @@ class GameActivity : SDLActivity() {
         if (raceSettings.fps && resumed) performance?.start() else performance?.stop()
     }
 
+    private fun editRaceControls() {
+        val controls = hud ?: return
+        racePanel?.visibility = View.GONE
+        edgeStartX = Float.NaN
+        openingPanel = false
+        controls.visibility = View.VISIBLE
+        controls.edit { updateRaceOverlays() }
+    }
+
     override fun onSaveInstanceState(state: Bundle) {
         if (::raceSettings.isInitialized) {
             state.putInt("race_framegen", raceSettings.framegen)
@@ -156,12 +167,13 @@ class GameActivity : SDLActivity() {
         super.onSaveInstanceState(state)
     }
 
-    @Deprecated("The game uses the Android back button to close the overlay.")
+    @Deprecated("The game uses the Android back button to close the panel or control editor.")
     override fun onBackPressed() {
-        if (racePanel?.visibility == View.VISIBLE) {
-            racePanel?.visibility = View.GONE
-        } else {
-            super.onBackPressed()
+        val controls = hud
+        when {
+            controls?.isEditing() == true -> controls.finishEdit()
+            racePanel?.visibility == View.VISIBLE -> racePanel?.visibility = View.GONE
+            else -> super.onBackPressed()
         }
     }
 
