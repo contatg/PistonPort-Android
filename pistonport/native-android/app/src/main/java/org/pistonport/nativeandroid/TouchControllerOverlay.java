@@ -27,7 +27,7 @@ final class TouchControllerOverlay extends View {
         "up","left","right","down","triangle","circle","cross","square","leftstick"
     };
     private static final float[][] DEFAULT={
-        {332,565},{125,116},{640,75},{1145,116},{1170,598},
+        {1023,598},{125,116},{640,75},{1145,116},{1170,598},
         {224,104},{181,150},{267,150},{224,196},{1161,366},{1170,478},{1023,510},{1028,393},{160,535}
     };
     private final Path controlShape = new Path();
