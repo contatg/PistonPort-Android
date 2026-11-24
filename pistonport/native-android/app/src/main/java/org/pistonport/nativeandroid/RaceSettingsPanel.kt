@@ -46,10 +46,10 @@ internal class RaceSettingsPanel(
                 state.framegen == 1 -> "FSR 3.1 selecionado. O medidor indica quando há quadros gerados."
                 !modelReady(state.model) -> "Instale o modelo ou importe sua Lossless.dll no launcher."
                 else -> when (nativeStatus()) {
-                    -2 -> "O driver atual não oferece suporte ao Pitframe."
-                    -1 -> "Pitframe falhou. Consulte o log do jogo."
-                    2 -> "Pitframe ativo • ${state.framegen}×"
-                    else -> "Preparando os quadros do Pitframe…"
+                    -2 -> "O driver atual não oferece suporte ao Piston Frame."
+                    -1 -> "Piston Frame falhou. Consulte o log do jogo."
+                    2 -> "Piston Frame ativo • ${state.framegen}×"
+                    else -> "Preparando os quadros do Piston Frame…"
                 }
             }
             postDelayed(this, 500)
@@ -90,11 +90,11 @@ internal class RaceSettingsPanel(
         }
         content.addView(upscaleReadout)
         section(content, "Geração de quadros")
-        options(content, listOf("Desligado", "FSR 2×", "Pitframe 2×", "3×", "4×", "Mescla 2×"), 3, { state.framegen }) {
+        options(content, listOf("Desligado", "FSR 2×", "Piston Frame 2×", "3×", "4×", "Mescla 2×"), 3, { state.framegen }) {
             state.framegen = it
             onGraphics(state)
         }
-        section(content, "Modelo Pitframe")
+        section(content, "Modelo Piston Frame")
         options(content, listOf("Lossless Scaling", "MAKO-FG"), 2, { state.model }) {
             state.model = it
             onGraphics(state)

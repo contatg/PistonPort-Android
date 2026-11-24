@@ -50,6 +50,12 @@ python3 pistonport/android/package_nixport.py --runtime /caminho/spartanport-arm
 
 O empacotador produz `PistonPort-Android-nixport.zip` quando recebe o construtor de AppImage compatível com Nixport. Esse ZIP é o arquivo para importar no Nixport. Use **Testar Vulkan** para verificar o Turnip ativo e **Jogar** para selecionar a pasta e a imagem no primeiro uso. A integração, os controles por toque e o desempenho ainda precisam ser testados num aparelho.
 
+### Atualizações do APK nativo
+
+Ao abrir o launcher, ele consulta a última versão estável em [GitHub Releases](https://github.com/contatg/PistonPort-Android/releases). Publique a versão com a tag `vX.Y.Z` correspondente ao app e anexe o arquivo `PistonPort-Android-DriverHub-arm64.apk` diretamente à release. A consulta automática usa o catálogo público. Em repositório privado, o botão **Versões no GitHub** abre a página no navegador para acesso com uma conta autorizada.
+
+Para instalar uma atualização por cima da versão anterior, os dois APKs precisam ter a mesma assinatura Android.
+
 ## Credits
 
 PistonPort uses SpartanPort’s loader, shadPS4’s Vulkan renderer, and Rune for the launcher. [SpartanPort](https://github.com/FelipePrado0/SpartanPort) · [shadPS4](https://github.com/shadps4-emu/shadPS4) · [Rune](https://github.com/anomalyco/rune) · [License](LICENSE)

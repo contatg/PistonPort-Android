@@ -1192,7 +1192,7 @@ index 5325169..fb1b5f7 100644
      u32 GetGraphicsQueueFamilyIndex() const {
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp
 new file mode 100644
-index 0000000..05280ba
+index 0000000..56a7685
 --- /dev/null
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_lsfg.cpp
 @@ -0,0 +1,771 @@
@@ -1402,7 +1402,7 @@ index 0000000..05280ba
 +    }
 +    load(api->init_v2, "bb_lsfg_init_v2"); // optional: Bloodframe 1.x has only bb_lsfg_init
 +    if (mako && !api->init_v2) {
-+        return fail(lib_path + " does not support the Pitframe MAKO-FG backend (missing bb_lsfg_init_v2)");
++        return fail(lib_path + " does not support the Piston Frame MAKO-FG backend (missing bb_lsfg_init_v2)");
 +    }
 +
 +    BbLsfgConfig config{};
@@ -1449,7 +1449,7 @@ index 0000000..05280ba
 +    }
 +    char diagnostics[768] = {};
 +    api->diagnostics(diagnostics, sizeof diagnostics);
-+    std::printf("Pitframe: %s x%u, flow scale %.2f, %s model, %s images, %s sync, started in %.0f ms; %s\n",
++    std::printf("Piston Frame: %s x%u, flow scale %.2f, %s model, %s images, %s sync, started in %.0f ms; %s\n",
 +                mako ? "MAKO-FG (experimental)" : "Lossless Scaling", multiplier, static_cast<double>(config.flow_scale),
 +                config.performance ? "performance" : "quality",
 +                shared_format == FormatRgba8 ? "RGBA8" : "RGBA16F", sync_host ? "CPU" : "sync-file",
@@ -1508,19 +1508,19 @@ index 0000000..05280ba
 +    switch (set) {
 +    case BB_LSFG_SET_FP16_SPIRV:
 +        shader_set_name = "FP16";
-+        std::printf("Pitframe: shaders FP16 SPIR-V (%s)\n", reason);
++        std::printf("Piston Frame: shaders FP16 SPIR-V (%s)\n", reason);
 +        break;
 +    case BB_LSFG_SET_FP32_SPIRV:
 +        shader_set_name = "FP32";
-+        std::printf("Pitframe: shaders FP32 SPIR-V (%s)\n", reason);
++        std::printf("Piston Frame: shaders FP32 SPIR-V (%s)\n", reason);
 +        break;
 +    case BB_LSFG_SET_MAKO_EXPERIMENTAL:
 +        shader_set_name = "MAKO-FG";
-+        std::printf("Pitframe: MAKO-FG V1.24 blend, motion estimation (%s)\n", reason);
++        std::printf("Piston Frame: MAKO-FG V1.24 blend, motion estimation (%s)\n", reason);
 +        break;
 +    default:
 +        shader_set_name = "FP32-DXBC";
-+        std::printf("Pitframe: shaders DXBC (translated) (%s)\n", reason);
++        std::printf("Piston Frame: shaders DXBC (translated) (%s)\n", reason);
 +        break;
 +    }
 +    std::fflush(stdout);
@@ -2162,7 +2162,7 @@ index 472be23..48d7718 100644
 +#endif
 
 diff --git a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
-index 4f29b10..08f2c5d 100644
+index 4f29b10..862dd85 100644
 --- a/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
 +++ b/gpu/shadps4/video_core/renderer_vulkan/vk_presenter.cpp
 @@ -50,2 +50,9 @@
@@ -2392,7 +2392,7 @@ index 4f29b10..08f2c5d 100644
 +            piston_report_pitframe(0);
 +        } else if (!instance.SupportsPitframe()) {
 +            piston_report_pitframe(-2);
-+            LOG_WARNING(Render_Vulkan, "Pitframe: driver lacks AHardwareBuffer or sync-fd support");
++            LOG_WARNING(Render_Vulkan, "Piston Frame: driver lacks AHardwareBuffer or sync-fd support");
 +        } else {
 +            auto settings = initial;
 +            settings.multiplier = static_cast<unsigned>(mode);
@@ -2433,7 +2433,7 @@ index 4f29b10..08f2c5d 100644
 +    }
 +    if (output.done) {
 +        const auto result = instance.GetDevice().resetFences(output.done);
-+        ASSERT_MSG(result == vk::Result::eSuccess, "Pitframe: output fence reset failed");
++        ASSERT_MSG(result == vk::Result::eSuccess, "Piston Frame: output fence reset failed");
 +    }
 +
 +    auto& scheduler = present_scheduler;

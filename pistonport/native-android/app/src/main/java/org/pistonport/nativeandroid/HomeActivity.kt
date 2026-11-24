@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -29,8 +30,12 @@ class HomeActivity : Activity() {
     private lateinit var settings: PortSettings
     private lateinit var homePage: ScrollView
     private lateinit var settingsPage: ScrollView
+    private lateinit var creditsPage: ScrollView
     private lateinit var homeTab: Button
     private lateinit var settingsTab: Button
+    private lateinit var creditsTab: Button
+    private lateinit var releaseButton: Button
+    private var availableUpdate: ReleaseUpdates.Update? = null
     private lateinit var graphicsTab: Button
     private lateinit var controlsTab: Button
     private lateinit var graphicsPanel: LinearLayout
@@ -68,18 +73,32 @@ class HomeActivity : Activity() {
         root.addView(pages, LinearLayout.LayoutParams(-1, 0, 1f))
         homePage = scrollPage(pages, buildHome())
         settingsPage = scrollPage(pages, buildSettings())
+        creditsPage = scrollPage(pages, page().apply {
+            addView(PortStyle.text(this@HomeActivity, "Créditos", 31f, bold = true))
+            append(this, card("contatg"))
+        })
         val menu = LinearLayout(this).apply {
             setBackgroundColor(PortStyle.surface)
             setPadding(dp(12), dp(8), dp(12), dp(8))
         }
-        homeTab = button("⌂   Início") { showSettings(false) }
-        settingsTab = button("⚙   Configurações") { showSettings(true) }
-        menu.addView(homeTab, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(5) })
-        menu.addView(settingsTab, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(5) })
+        homeTab = button("Início") { showPage(homePage) }
+        settingsTab = button("Configurações") { showPage(settingsPage) }
+        creditsTab = button("Créditos") { showPage(creditsPage) }
+        for (tab in listOf(homeTab, settingsTab, creditsTab)) {
+            menu.addView(tab, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                marginStart = dp(3)
+                marginEnd = dp(3)
+            })
+        }
         root.addView(menu)
         setContentView(root)
-        showSettings(state?.getBoolean("settings_page") == true)
+        showPage(when {
+            state?.getBoolean("credits_page") == true -> creditsPage
+            state?.getBoolean("settings_page") == true -> settingsPage
+            else -> homePage
+        })
         showControls(state?.getBoolean("controls_page") == true)
+        checkForUpdates()
         Thread {
             val result = runCatching { GpuInfo.detect() }.getOrElse {
                 GpuInfo("GPU não detectada", "indisponível", false)
@@ -97,6 +116,7 @@ class HomeActivity : Activity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("hub_source", lastHubSource?.name)
         outState.putBoolean("settings_page", settingsPage.visibility == View.VISIBLE)
+        outState.putBoolean("credits_page", creditsPage.visibility == View.VISIBLE)
         outState.putBoolean("controls_page", controlsPanel.visibility == View.VISIBLE)
         super.onSaveInstanceState(outState)
     }
@@ -139,6 +159,27 @@ class HomeActivity : Activity() {
         }
         append(game, select)
         addView(game)
+        releaseButton = button("Versões no GitHub") { openRelease(availableUpdate?.download ?: ReleaseUpdates.releasesPage) }
+        append(this, releaseButton)
+    }
+
+    private fun checkForUpdates() {
+        val version = packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+            .versionName ?: return
+        Thread {
+            val update = runCatching { ReleaseUpdates.check(version) }.getOrNull() ?: return@Thread
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                    availableUpdate = update
+                    releaseButton.text = "Baixar atualização ${update.version}"
+                }
+            }
+        }.start()
+    }
+
+    private fun openRelease(url: String) {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            .onFailure { android.widget.Toast.makeText(this, "Nenhum navegador disponível.", android.widget.Toast.LENGTH_SHORT).show() }
     }
 
     private fun buildSettings(): LinearLayout = page().apply {
@@ -215,8 +256,8 @@ class HomeActivity : Activity() {
 
         val frame = card("Geração de quadros")
         graphicsChoice(frame, "Método", "framegen", 0, listOf(0 to "Desligado", 1 to "FSR 3.1 · 2×",
-            2 to "Pitframe · 2×", 3 to "Pitframe · 3×", 4 to "Pitframe · 4×", 5 to "Mescla · 2×"))
-        graphicsChoice(frame, "Modelo Pitframe", "fg_model", 0,
+            2 to "Piston Frame · 2×", 3 to "Piston Frame · 3×", 4 to "Piston Frame · 4×", 5 to "Mescla · 2×"))
+        graphicsChoice(frame, "Modelo Piston Frame", "fg_model", 0,
             listOf(0 to "Lossless Scaling", 1 to "MAKO-FG experimental"))
         graphicsSlider(frame, "Escala de movimento", "fg_flow", 25, 100, 75)
         graphicsToggle(frame, "Modo desempenho", "fg_fast", true)
@@ -282,11 +323,12 @@ class HomeActivity : Activity() {
         addView(card)
     }
 
-    private fun showSettings(visible: Boolean) {
-        homePage.visibility = if (visible) View.GONE else View.VISIBLE
-        settingsPage.visibility = if (visible) View.VISIBLE else View.GONE
-        mark(homeTab, !visible)
-        mark(settingsTab, visible)
+    private fun showPage(active: ScrollView) {
+        for ((page, tab) in listOf(homePage to homeTab, settingsPage to settingsTab, creditsPage to creditsTab)) {
+            val selected = active == page
+            page.visibility = if (selected) View.VISIBLE else View.GONE
+            mark(tab, selected)
+        }
     }
 
     private fun showControls(visible: Boolean) {
@@ -430,7 +472,7 @@ class HomeActivity : Activity() {
             val mako = settings.choice("fg_model", 0) == 1
             val ready = if (mako) FrameGenAssets.makoInstalled(profile) else FrameGenAssets.lossless(profile).isFile
             if (!ready) {
-                panelDialog(card("Pitframe").apply {
+                panelDialog(card("Piston Frame").apply {
                     addView(PortStyle.text(this@HomeActivity,
                         if (mako) "Baixe MAKO-FG em Gráficos → Geração de quadros."
                         else "Importe sua Lossless.dll em Gráficos → Geração de quadros.", 15f, PortStyle.muted))
