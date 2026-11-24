@@ -12,7 +12,7 @@ A licença principal é a [GNU GPL v2](../LICENSE). O arquivo [pistonport/LICENS
 | [SpartanPort — FelipePrado0 e colaboradores](https://github.com/FelipePrado0/SpartanPort) | Loader e runtime | GPL v2 |
 | [gow3_android — zFitness](https://github.com/zFitness/gow3_android/tree/56e804d1ef3e108257b94c51b6f7fb204930a244) | Backend ARM64 e adaptação Android | GPL v2 |
 | [gow3_android — niilo](https://github.com/niilo/gow3_android/tree/046791de0fd4639b0b479afe8fc7ec67e538925d) | Dependências Android/Bionic | GPL v2 |
-| [shadPS4 — equipe e colaboradores](https://github.com/shadps4-emu/shadPS4) | Renderizador Vulkan e emulação | [Licença preservada](../gpu/shadps4/LICENSE) |
+| [shadPS4 — equipe e colaboradores](https://github.com/shadps4-emu/shadPS4) | Renderizador Vulkan e emulação; revisão `b4e7ae776071ceb1dd35004577a8719481e1d258` e backports descritos em [VENDOR.txt](../gpu/VENDOR.txt) | [Licença preservada](../gpu/shadps4/LICENSE) |
 | [FEX-Emu — equipe FEX](https://github.com/FEX-Emu/FEX) | Tradução x86-64 para ARM64 | MIT; componentes internos podem ter outros termos |
 | [FEXDroid — cobrabm12](https://github.com/cobrabm12/fexdroid/tree/410bba28cf2f55e08fd9588266524106387ea67c) | Host do APK alternativo | MIT |
 | Nixport | Alvo experimental de empacotamento; ver README principal | Ver distribuição correspondente |
@@ -40,6 +40,7 @@ A licença principal é a [GNU GPL v2](../LICENSE). O arquivo [pistonport/LICENS
 | [Xbyak — herumi](https://github.com/herumi/xbyak) | BSD-3-Clause |
 | half — Christian Rau | [Licença original](../gpu/third_party/half/LICENSE.txt) |
 | sirit | [Licença original](../gpu/third_party/sirit/LICENSE.txt) |
+| GCN — Advanced Micro Devices, Inc. | Aviso de copyright 2015–2021 e licença permissiva no [cabeçalho PM4](../gpu/third_party/gcn/include/gcn/si_ci_vi_merged_pm4_it_opcodes.h); consulte também os demais cabeçalhos GCN. |
 | SMAA | [Licença original](../gpu/shadps4/video_core/host_shaders/smaa/LICENSE.txt) |
 | Intel XeSS | Avisos nos cabeçalhos [xess.h](../gpu/third_party/xess/xess.h) e [xess_vk.h](../gpu/third_party/xess/xess_vk.h); não presume redistribuição do SDK |
 | [fmt](https://github.com/fmtlib/fmt), [Boost](https://www.boost.org/), [robin-map](https://github.com/Tessil/robin-map), [Zydis](https://github.com/zyantific/zydis), [FFmpeg](https://ffmpeg.org/) | Dependências CMake e/ou testes; conferir licença e configuração exatas |
@@ -66,6 +67,13 @@ A licença principal é a [GNU GPL v2](../LICENSE). O arquivo [pistonport/LICENS
 | [orbis-pkg](https://crates.io/crates/orbis-pkg), [orbis-pfs](https://crates.io/crates/orbis-pfs) | Leitor PKG original, versão 0.1.0; consultar avisos dos pacotes |
 
 Fontes deste inventário: [CMake GPU](../gpu/CMakeLists.txt), [manifesto do launcher](../launcher-rust/pistonport/Cargo.toml), [manifesto PKG](../pistonport/pkg/Cargo.toml), [submódulos](../.gitmodules) e [Gradle Android](../pistonport/native-android/app/build.gradle.kts). Os manifestos Rust declaram GPL-2.0-or-later para os próprios pacotes. Isso não altera as licenças de terceiros.
+
+## Infraestrutura de compilação e rastreabilidade
+
+- [GitHub Actions](https://github.com/actions): checkout, setup-java, setup-python, cache e upload-artifact; [Docker setup-qemu](https://github.com/docker/setup-qemu-action) para o fluxo alternativo. Consulte os termos das revisões usadas nos [workflows](../.github/workflows).
+- [QEMU](https://www.qemu.org/), [Ninja](https://ninja-build.org/), [patchelf](https://github.com/NixOS/patchelf), [SquashFS tools](https://github.com/plougher/squashfs-tools): ferramentas de empacotamento/compilação, não necessariamente distribuídas no APK.
+- Versões declaradas para o launcher Android: Android Gradle Plugin 8.13.2, Kotlin 2.2.21, Chaquopy 17.0.0 e Python 3.13; consulte o [Gradle](../pistonport/native-android/app/build.gradle.kts).
+- Dependências Rust resolvidas: [Cargo.lock do launcher](../launcher-rust/pistonport/Cargo.lock) e [Cargo.lock do leitor PKG](../pistonport/pkg/Cargo.lock). Dependências transitivas devem ser verificadas pelos respectivos manifestos e textos de licença.
 
 Antes de cada release, conferir dependências transitivas resolvidas, avisos dos binários efetivamente empacotados, licenças dos submódulos e disponibilidade do código-fonte correspondente aos destinatários. Um link upstream não substitui a inclusão do texto de licença quando exigida.
 
