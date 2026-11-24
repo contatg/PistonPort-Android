@@ -62,7 +62,13 @@ Para instalar uma atualização por cima da versão anterior, os dois APKs preci
 
 **Projeto original:** [afkarxyz/PistonPort](https://github.com/afkarxyz/PistonPort). Agradecimentos aos autores e colaboradores de [SpartanPort](https://github.com/FelipePrado0/SpartanPort), [shadPS4](https://github.com/shadps4-emu/shadPS4), [gow3_android (zFitness)](https://github.com/zFitness/gow3_android), [gow3_android (niilo)](https://github.com/niilo/gow3_android), [FEX](https://github.com/FEX-Emu/FEX), [FEXDroid](https://github.com/cobrabm12/fexdroid), [Rune](https://github.com/anomalyco/rune), [Bloodborne-Android](https://github.com/ducvd89/Bloodborne-Android), [Bloodframe](https://github.com/ducvd89/bloodframe), [lsfg-vk](https://github.com/PancakeTAS/lsfg-vk), Ragnarok93/GameNative, [Fractal](https://github.com/dfdx047/Fractal), [libadrenotools](https://github.com/bylaws/libadrenotools), [Mesa](https://mesa3d.org/), [SDL](https://github.com/libsdl-org/SDL), [AMD GPUOpen](https://gpuopen.com/), [Snapdragon GSR 2](https://github.com/SnapdragonStudios/snapdragon-gsr) e [MAKO-FG](https://huggingface.co/eugeniosegala/MAKO-FG).
 
-Agradecemos também aos mantenedores dos drivers Turnip/PanVK, bibliotecas, ferramentas de build, ícones, fontes e recursos listados abaixo. Piston Frame é uma adaptação baseada no Bloodframe, não uma implementação originalmente independente.
+**Bibliotecas e ferramentas:** Dear ImGui, LibAtrac9, magic_enum, miniz, Xbyak, half, sirit, SPIRV-Headers, SMAA, Intel XeSS, fmt, Boost, robin-map, Zydis, FFmpeg, xxHash, X.Org/X11, glslang, Chaquopy, Python, pyelftools, Pillow, Android SDK/NDK, LLVM, Kotlin, Gradle, Rust e as dependências Rust do launcher e do leitor PKG.
+
+**Recursos visuais:** Lucide, Kenney Input Prompts e DejaVu Sans.
+
+**Driver Hub:** Mesa Turnip/PanVK e os mantenedores StevenMXZ, MrPurple666, K11MCH1, The412Banner, zenithblue-oss, JimVulkan, MineGraph-bilibili, soulexit e FristOneRR. Os drivers são opcionais e baixados separadamente.
+
+Agradecemos a todos os autores e colaboradores desses projetos. O inventário abaixo distingue código incorporado, dependências de build e referências. Piston Frame é uma adaptação baseada no Bloodframe, não uma implementação originalmente independente.
 
 - [Créditos detalhados da versão Android](pistonport/native-android/CREDITS.md)
 - [Inventário de licenças, autores e avisos de terceiros](licenses/README.md)
