@@ -37,6 +37,7 @@ final class TouchControllerOverlay extends View {
     /** A control's size in the editor: a factor of its default size. */
     private static final float MIN_SIZE=0.6f, MAX_SIZE=2f, SIZE_STEP=1.1f;
     private final Input pad;
+    private final String brakeLabel, towLabel, lookBackLabel, accelerateLabel, pauseLabel, weaponLabel, jumpLabel, steerLabel;
     private final SharedPreferences preferences;
     private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Map<String,PointF> centers=new LinkedHashMap<>();
@@ -60,9 +61,17 @@ final class TouchControllerOverlay extends View {
 
     TouchControllerOverlay(Context context,Input pad) {
         super(context); this.pad=pad;
+        brakeLabel = context.getString(R.string.pad_brake);
+        towLabel = context.getString(R.string.pad_tow);
+        lookBackLabel = context.getString(R.string.pad_look_back);
+        accelerateLabel = context.getString(R.string.pad_accelerate);
+        pauseLabel = context.getString(R.string.pad_pause);
+        weaponLabel = context.getString(R.string.pad_weapon);
+        jumpLabel = context.getString(R.string.pad_jump);
+        steerLabel = context.getString(R.string.pad_steer);
         preferences=context.getSharedPreferences("piston-race-controls",Context.MODE_PRIVATE);
         load(null);
-        setContentDescription("Controle de PlayStation na tela");
+        setContentDescription(getContext().getString(R.string.pad_description));
     }
 
     /** One layout per screen shape: a device with several screens or window sizes (a foldable's inner and outer
@@ -245,10 +254,10 @@ final class TouchControllerOverlay extends View {
         editor.apply(); save(); release(); invalidate();
     }
     private void confirmReset() {
-        new android.app.AlertDialog.Builder(getContext()).setTitle("Restaurar controles?")
-            .setMessage("Restaura a posição e o tamanho dos botões neste formato de tela.")
-            .setNegativeButton("Cancelar",null)
-            .setPositiveButton("Restaurar",(d,w) -> { resetLayout(); selected=null; invalidate(); }).show();
+        new android.app.AlertDialog.Builder(getContext()).setTitle(getContext().getString(R.string.editor_reset_title))
+            .setMessage(getContext().getString(R.string.editor_reset_body))
+            .setNegativeButton(getContext().getString(R.string.cancel),null)
+            .setPositiveButton(getContext().getString(R.string.editor_reset_action),(d,w) -> { resetLayout(); selected=null; invalidate(); }).show();
     }
     private void resize(String name,float s) {
         sizes.put(name,clampSize(s));
@@ -425,7 +434,7 @@ final class TouchControllerOverlay extends View {
         controlShape.close();
         paint.setColor(0xffffe4c5);
         c.drawPath(controlShape,paint);
-        label(c,"L • DIREÇÃO",p.x,p.y-78*s,16*s,0xffffd1ca);
+        label(c,steerLabel,p.x,p.y-78*s,16*s,0xffffd1ca);
         selection(c,name,67*s,67*s);
     }
 
@@ -441,20 +450,20 @@ final class TouchControllerOverlay extends View {
     @Override protected void onDraw(Canvas c) {
         super.onDraw(c);
         c.save(); c.translate(offsetX(),offsetY()); c.scale(scale(),scale());
-        plate(c,"l2","L2","FREIO"); plate(c,"l1","L1","REBOQUE");
-        plate(c,"r1","R1","OLHAR ATRÁS"); plate(c,"r2","R2","ACELERAR");
-        plate(c,"options","OPTIONS","PAUSA");
+        plate(c,"l2","L2",brakeLabel); plate(c,"l1","L1",towLabel);
+        plate(c,"r1","R1",lookBackLabel); plate(c,"r2","R2",accelerateLabel);
+        plate(c,"options","OPTIONS",pauseLabel);
         plate(c,"up","▲",""); plate(c,"left","◀",""); plate(c,"right","▶",""); plate(c,"down","▼","");
-        plate(c,"triangle","△","ARMA / BUZINA"); plate(c,"circle","○","DRIFT");
-        plate(c,"cross","×","PULAR"); plate(c,"square","□","TURBO");
+        plate(c,"triangle","△",weaponLabel); plate(c,"circle","○","DRIFT");
+        plate(c,"cross","×",jumpLabel); plate(c,"square","□","TURBO");
         drawStick(c);
         if (editing) {
-            barButton(c,RESET,"REPOR",true); barButton(c,MINUS,"−",selected!=null); barButton(c,DONE,"CONCLUIR",true); barButton(c,PLUS,"+",selected!=null);
+            barButton(c,RESET,getContext().getString(R.string.editor_reset_short),true); barButton(c,MINUS,"−",selected!=null); barButton(c,DONE,getContext().getString(R.string.editor_done),true); barButton(c,PLUS,"+",selected!=null);
             paint.setStyle(Paint.Style.FILL); paint.setTextSize(17); paint.setColor(0xfff0d5df);
             paint.setTextAlign(Paint.Align.CENTER);
-            c.drawText(selected==null ? "Arraste um botão para mover" : "Arraste para mover · pince ou use −/+ para redimensionar",640,BAR_BOTTOM+110,paint);
+            c.drawText(selected==null ? getContext().getString(R.string.editor_drag) : getContext().getString(R.string.editor_resize),640,BAR_BOTTOM+110,paint);
             paint.setTextSize(14); paint.setColor(0xb0e8dfc9);
-            c.drawText("Layout para o formato de tela "+shapeName()+"",640,BAR_BOTTOM+136,paint);
+            c.drawText(getContext().getString(R.string.editor_shape, shapeName()),640,BAR_BOTTOM+136,paint);
         }
         c.restore();
     }

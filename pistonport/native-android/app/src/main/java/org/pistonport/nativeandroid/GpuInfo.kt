@@ -1,5 +1,6 @@
 package org.pistonport.nativeandroid
 
+import android.content.Context
 import android.opengl.EGL14
 import android.opengl.GLES20
 
@@ -25,15 +26,19 @@ internal data class GpuInfo(
         adrenoFamily != null -> DriverKind.TURNIP
         else -> null
     }
-    val label: String
-        get() = "$name · Vulkan $version\n" + when {
-            stockReady -> "O driver do sistema atende aos requisitos do Vulkan."
+    fun displayName(context: Context) = name.ifBlank { context.getString(R.string.gpu_unknown) }
+
+    fun summary(context: Context): String {
+        val api = version.ifBlank { context.getString(R.string.version_unknown) }
+        return "${displayName(context)} · Vulkan $api\n" + when {
+            stockReady -> context.getString(R.string.stock_supported)
             driverKind == DriverKind.TURNIP ->
-                "O driver do sistema não atende aos requisitos. Escolha um Turnip pelo Hub."
+                context.getString(R.string.stock_turnip)
             driverKind == DriverKind.PANVK ->
-                "O driver do sistema não atende aos requisitos. Consulte os pacotes PanVK para sua Mali no Hub."
-            else -> "O driver do sistema não atende aos requisitos e o Hub não tem pacotes para esta GPU."
+                context.getString(R.string.stock_panvk)
+            else -> context.getString(R.string.stock_unsupported)
         }
+    }
 
     companion object {
         fun detect(): GpuInfo {
@@ -41,8 +46,8 @@ internal data class GpuInfo(
                 System.loadLibrary("piston_gpu_info")
                 readStockVulkan().split('\t')
             }.getOrDefault(emptyList())
-            val info = GpuInfo(data.getOrElse(0) { "GPU não detectada" },
-                data.getOrElse(1) { "indisponível" }, data.getOrNull(2) == "1",
+            val info = GpuInfo(data.getOrElse(0) { "" }.takeUnless { it == "GPU não detectada" }.orEmpty(),
+                data.getOrElse(1) { "" }.takeUnless { it == "indisponível" }.orEmpty(), data.getOrNull(2) == "1",
                 data.getOrElse(3) { "" })
             if (info.driverKind != null && (info.driverKind != DriverKind.PANVK || info.maliModel != null))
                 return info

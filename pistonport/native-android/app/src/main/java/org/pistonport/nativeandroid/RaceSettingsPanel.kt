@@ -33,23 +33,23 @@ internal class RaceSettingsPanel(
             val provider = upscalerStatus()
             upscaleReadout.text = when {
                 state.upscaler == 0 -> ""
-                provider == 4 && state.upscaler != 4 -> "FSR 1 ativo como alternativa."
-                provider != 0 -> "${upscalerName(provider)} ativo."
-                state.upscaler == 2 -> "Aguardando uma cena compatível com TAA."
-                else -> "Aguardando um quadro abaixo da resolução de saída."
+                provider == 4 && state.upscaler != 4 -> context.getString(R.string.upscale_fallback)
+                provider != 0 -> context.getString(R.string.upscaler_active, upscalerName(provider))
+                state.upscaler == 2 -> context.getString(R.string.upscale_waiting_taa)
+                else -> context.getString(R.string.upscale_waiting)
             }
             upscaleReadout.visibility = if (state.upscaler == 0) View.GONE else View.VISIBLE
             status.text = when {
-                state.framegen == 0 -> "Framegen desligado."
-                state.framegen == 5 -> "Mescla dois quadros do jogo. Veja o resultado no medidor de FPS."
-                state.framegen == 1 && state.upscaler != 1 -> "Selecione o upscaler FSR 3.1 para usar este framegen."
-                state.framegen == 1 -> "FSR 3.1 selecionado. O medidor indica quando há quadros gerados."
-                !modelReady(state.model) -> "Instale o modelo ou importe sua Lossless.dll no launcher."
+                state.framegen == 0 -> context.getString(R.string.framegen_off)
+                state.framegen == 5 -> context.getString(R.string.blend_detail)
+                state.framegen == 1 && state.upscaler != 1 -> context.getString(R.string.fg_fsr_hint)
+                state.framegen == 1 -> context.getString(R.string.fg_fsr_active)
+                !modelReady(state.model) -> context.getString(R.string.model_required)
                 else -> when (nativeStatus()) {
-                    -2 -> "O driver atual não oferece suporte ao Piston Frame."
-                    -1 -> "Piston Frame falhou. Consulte o log do jogo."
-                    2 -> "Piston Frame ativo • ${state.framegen}×"
-                    else -> "Preparando os quadros do Piston Frame…"
+                    -2 -> context.getString(R.string.framegen_unsupported)
+                    -1 -> context.getString(R.string.framegen_failed)
+                    2 -> context.getString(R.string.framegen_active, state.framegen)
+                    else -> context.getString(R.string.framegen_loading)
                 }
             }
             postDelayed(this, 500)
@@ -70,31 +70,31 @@ internal class RaceSettingsPanel(
         })
         val header = LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
-            addView(PortStyle.text(context, "Ajustes de corrida", 19f, bold = true),
+            addView(PortStyle.text(context, context.getString(R.string.race_settings), 19f, bold = true),
                 LinearLayout.LayoutParams(0, -2, 1f))
-            addView(button("Fechar") { this@RaceSettingsPanel.visibility = View.GONE })
+            addView(button(context.getString(R.string.close)) { this@RaceSettingsPanel.visibility = View.GONE })
         }
         pane.addView(header)
         val content = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         pane.addView(ScrollView(context).apply { addView(content) }, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        toggle(content, "Mostrar FPS e GPU", state.fps) { state.fps = it; onOverlay(state) }
-        section(content, "Controles")
-        toggle(content, "Controles por toque", state.touch) { state.touch = it; onOverlay(state) }
-        content.addView(button("Editar controles") { onEditControls() },
+        toggle(content, context.getString(R.string.show_fps), state.fps) { state.fps = it; onOverlay(state) }
+        section(content, context.getString(R.string.controls))
+        toggle(content, context.getString(R.string.touch), state.touch) { state.touch = it; onOverlay(state) }
+        content.addView(button(context.getString(R.string.edit_controls)) { onEditControls() },
             LinearLayout.LayoutParams(-1, context.dp(44)))
         section(content, "Upscaler")
-        options(content, listOf("Desligado", "FSR 3.1", "TAA", "GSR 2", "FSR 1"), 2, { state.upscaler }) {
+        options(content, listOf(context.getString(R.string.off), "FSR 3.1", "TAA", "GSR 2", "FSR 1"), 2, { state.upscaler }) {
             state.upscaler = it
             onGraphics(state)
         }
         content.addView(upscaleReadout)
-        section(content, "Geração de quadros")
-        options(content, listOf("Desligado", "FSR 2×", "Piston Frame 2×", "3×", "4×", "Mescla 2×"), 3, { state.framegen }) {
+        section(content, context.getString(R.string.frame_generation))
+        options(content, listOf(context.getString(R.string.off), "FSR 2×", "Piston Frame 2×", "3×", "4×", context.getString(R.string.blend_short)), 3, { state.framegen }) {
             state.framegen = it
             onGraphics(state)
         }
-        section(content, "Modelo Piston Frame")
+        section(content, context.getString(R.string.frame_model))
         options(content, listOf("Lossless Scaling", "MAKO-FG"), 2, { state.model }) {
             state.model = it
             onGraphics(state)

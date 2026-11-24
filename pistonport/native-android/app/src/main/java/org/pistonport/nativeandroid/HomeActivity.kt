@@ -48,6 +48,8 @@ class HomeActivity : Activity() {
     private lateinit var importDriver: Button
     private lateinit var openHub: Button
     private lateinit var settingsGpu: TextView
+    private lateinit var compatibilityButton: Button
+    private var hardwareNotice: AlertDialog? = null
     private var gpuInfo: GpuInfo? = null
     private val catalogs = mutableMapOf<DriverCatalog.Source, List<DriverCatalog.Entry>>()
     private var resumed = false
@@ -74,16 +76,21 @@ class HomeActivity : Activity() {
         homePage = scrollPage(pages, buildHome())
         settingsPage = scrollPage(pages, buildSettings())
         creditsPage = scrollPage(pages, page().apply {
-            addView(PortStyle.text(this@HomeActivity, "Créditos", 31f, bold = true))
-            append(this, card("contatg"))
+            addView(PortStyle.text(this@HomeActivity, getString(R.string.credits_tab), 31f, bold = true))
+            append(this, card("contatg").apply {
+                addView(PortStyle.text(this@HomeActivity, getString(R.string.project_about), 15f, PortStyle.muted))
+                append(this, button(getString(R.string.project_github)) {
+                    openRelease("https://github.com/contatg/PistonPort-Android")
+                })
+            })
         })
         val menu = LinearLayout(this).apply {
             setBackgroundColor(PortStyle.surface)
             setPadding(dp(12), dp(8), dp(12), dp(8))
         }
-        homeTab = button("Início") { showPage(homePage) }
-        settingsTab = button("Configurações") { showPage(settingsPage) }
-        creditsTab = button("Créditos") { showPage(creditsPage) }
+        homeTab = button(getString(R.string.home_tab)) { showPage(homePage) }
+        settingsTab = button(getString(R.string.settings_tab)) { showPage(settingsPage) }
+        creditsTab = button(getString(R.string.credits_tab)) { showPage(creditsPage) }
         for (tab in listOf(homeTab, settingsTab, creditsTab)) {
             menu.addView(tab, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
                 marginStart = dp(3)
@@ -101,7 +108,7 @@ class HomeActivity : Activity() {
         checkForUpdates()
         Thread {
             val result = runCatching { GpuInfo.detect() }.getOrElse {
-                GpuInfo("GPU não detectada", "indisponível", false)
+                GpuInfo("", "", false)
             }
             runOnUiThread {
                 if (!isDestroyed && !isFinishing) {
@@ -147,19 +154,19 @@ class HomeActivity : Activity() {
             addView(headline, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
         }
         addView(banner, LinearLayout.LayoutParams(-1, dp(190)).apply { bottomMargin = dp(18) })
-        play = button("▶   Jogar", primary = true, click = ::playGame)
+        play = button(getString(R.string.play), primary = true, click = ::playGame)
         addView(play, LinearLayout.LayoutParams(-1, dp(58)).apply { bottomMargin = dp(18) })
-        val game = card("Pasta do jogo")
+        val game = card(getString(R.string.game_folder))
         status = PortStyle.text(this@HomeActivity, "", 14f, PortStyle.muted)
         game.addView(status)
-        select = button("Selecionar pasta do jogo") {
+        select = button(getString(R.string.pick_folder)) {
             if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED)
                 openPicker()
             else requestPermissions(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE), STORAGE)
         }
         append(game, select)
         addView(game)
-        releaseButton = button("Versões no GitHub") { openRelease(availableUpdate?.download ?: ReleaseUpdates.releasesPage) }
+        releaseButton = button(getString(R.string.releases)) { openRelease(availableUpdate?.download ?: ReleaseUpdates.releasesPage) }
         append(this, releaseButton)
     }
 
@@ -171,7 +178,7 @@ class HomeActivity : Activity() {
             runOnUiThread {
                 if (!isFinishing && !isDestroyed) {
                     availableUpdate = update
-                    releaseButton.text = "Baixar atualização ${update.version}"
+                    releaseButton.text = getString(R.string.download_update, update.version)
                 }
             }
         }.start()
@@ -179,18 +186,18 @@ class HomeActivity : Activity() {
 
     private fun openRelease(url: String) {
         runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-            .onFailure { android.widget.Toast.makeText(this, "Nenhum navegador disponível.", android.widget.Toast.LENGTH_SHORT).show() }
+            .onFailure { android.widget.Toast.makeText(this, getString(R.string.no_browser), android.widget.Toast.LENGTH_SHORT).show() }
     }
 
     private fun buildSettings(): LinearLayout = page().apply {
-        addView(PortStyle.text(this@HomeActivity, "Configurações", 31f, bold = true))
+        addView(PortStyle.text(this@HomeActivity, getString(R.string.settings_tab), 31f, bold = true))
         val tabs = LinearLayout(this@HomeActivity).apply {
             background = PortStyle.panel(this@HomeActivity, PortStyle.surface, 16)
             val padding = dp(4)
             setPadding(padding, padding, padding, padding)
         }
-        graphicsTab = button("Gráficos") { showControls(false) }
-        controlsTab = button("Controles") { showControls(true) }
+        graphicsTab = button(getString(R.string.graphics)) { showControls(false) }
+        controlsTab = button(getString(R.string.controls)) { showControls(true) }
         tabs.addView(graphicsTab, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginEnd = dp(3) })
         tabs.addView(controlsTab, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(3) })
         append(this, tabs)
@@ -202,39 +209,39 @@ class HomeActivity : Activity() {
 
     private fun buildGraphics(): LinearLayout = column().apply {
         addView(PortStyle.text(this@HomeActivity,
-            "Durante a corrida, deslize do meio de qualquer borda lateral para dentro para abrir os ajustes.",
+            getString(R.string.in_game_hint),
             13f, PortStyle.muted))
-        val rendering = card("Imagem e desempenho")
+        val rendering = card(getString(R.string.graphics_performance))
         append(rendering, Switch(this@HomeActivity).apply {
-            text = "Modo Batata"
+            text = getString(R.string.potato)
             setTextColor(PortStyle.text)
             minHeight = dp(48)
             isChecked = settings.liteMode
             setOnCheckedChangeListener { _, checked -> settings.liteMode = checked }
         })
         append(rendering, PortStyle.text(this@HomeActivity,
-            "Ativo no Snapdragon 685 por padrão. Usa 360p e limita a 30 FPS, com efeitos e framegen desligados ao iniciar. Desative para usar seus ajustes manuais.",
+            getString(R.string.potato_detail),
             13f, PortStyle.muted))
-        menuChoice(rendering, "Resolução interna", listOf(
+        menuChoice(rendering, getString(R.string.internal_resolution), listOf(
             360 to "360p", 480 to "480p", 540 to "540p", 720 to "720p",
             900 to "900p", 1080 to "1080p", 1440 to "1440p"),
             { settings.resolution }, { settings.resolution = it })
-        graphicsChoice(rendering, "Saída do upscaler", "output", 1080,
+        graphicsChoice(rendering, getString(R.string.output_resolution), "output", 1080,
             listOf(540 to "540p", 720 to "720p", 900 to "900p", 1080 to "1080p", 1440 to "1440p"))
-        graphicsChoice(rendering, "Proporção da imagem", "aspect", 0,
-            aspectRatios.mapIndexed { index, aspect -> index to if (index == 0) "Automática" else aspect })
+        graphicsChoice(rendering, getString(R.string.aspect), "aspect", 0,
+            aspectRatios.mapIndexed { index, aspect -> index to if (index == 0) getString(R.string.automatic) else aspect })
         graphicsChoice(rendering, "Upscaler", "upscaler", 0,
-            listOf(0 to "Desligado", 1 to "FSR 3.1", 2 to "TAA", 3 to "GSR 2", 4 to "FSR 1"))
-        graphicsChoice(rendering, "Qualidade do upscaler", "preset", 3, listOf(
-            0 to "Nativa", 5 to "Ultra qualidade", 1 to "Qualidade",
-            2 to "Equilibrado", 3 to "Desempenho", 4 to "Ultra desempenho"))
-        graphicsSlider(rendering, "Nitidez", "sharpness", 0, 100, 20)
-        menuChoice(rendering, "Limite de FPS", listOf(
-            30 to "30 FPS", 40 to "40 FPS", 45 to "45 FPS", 60 to "60 FPS", 0 to "Sem limite"),
+            listOf(0 to getString(R.string.off), 1 to "FSR 3.1", 2 to "TAA", 3 to "GSR 2", 4 to "FSR 1"))
+        graphicsChoice(rendering, getString(R.string.upscaler_quality), "preset", 3, listOf(
+            0 to getString(R.string.native_resolution), 5 to getString(R.string.ultra_quality), 1 to getString(R.string.quality),
+            2 to getString(R.string.balanced), 3 to getString(R.string.performance), 4 to getString(R.string.ultra_performance)))
+        graphicsSlider(rendering, getString(R.string.sharpness), "sharpness", 0, 100, 20)
+        menuChoice(rendering, getString(R.string.fps_limit), listOf(
+            30 to "30 FPS", 40 to "40 FPS", 45 to "45 FPS", 60 to "60 FPS", 0 to getString(R.string.fps_unlimited)),
             { settings.fps }, { settings.fps = it })
         graphicsToggle(rendering, "VSync", "vsync", true)
         append(rendering, Switch(this@HomeActivity).apply {
-            text = "Medidor de FPS e GPU"
+            text = getString(R.string.performance_hud)
             setTextColor(PortStyle.text)
             minHeight = dp(48)
             isChecked = settings.performanceHud
@@ -242,58 +249,60 @@ class HomeActivity : Activity() {
         })
         append(this, rendering)
 
-        val effects = card("Efeitos gráficos")
+        val effects = card(getString(R.string.effects))
         graphicsToggle(effects, "Bloom", "bloom", true)
-        graphicsToggle(effects, "Profundidade de campo", "dof", true)
-        graphicsToggle(effects, "Desfoque de movimento", "motion_blur", true)
-        graphicsToggle(effects, "Sombras", "shadows", true)
-        graphicsToggle(effects, "Compilar shaders em segundo plano", "async", true)
-        graphicsChoice(effects, "Qualidade das texturas", "texture", 0,
-            listOf(0 to "Alta (do jogo)", 1 to "Média", 2 to "Baixa", 3 to "Muito baixa"))
-        choices(effects, "Filtragem de textura", listOf(0 to "Do jogo", 2 to "2×", 4 to "4×", 8 to "8×", 16 to "16×"),
+        graphicsToggle(effects, getString(R.string.dof), "dof", true)
+        graphicsToggle(effects, getString(R.string.motion_blur), "motion_blur", true)
+        graphicsToggle(effects, getString(R.string.shadows), "shadows", true)
+        graphicsToggle(effects, getString(R.string.async_shaders), "async", true)
+        graphicsChoice(effects, getString(R.string.texture_quality), "texture", 0,
+            listOf(0 to getString(R.string.quality_high), 1 to getString(R.string.quality_medium), 2 to getString(R.string.quality_low), 3 to getString(R.string.quality_very_low)))
+        choices(effects, getString(R.string.texture_filter), listOf(0 to getString(R.string.game_default), 2 to "2×", 4 to "4×", 8 to "8×", 16 to "16×"),
             { settings.filtering }, { settings.filtering = it })
         append(this, effects)
 
-        val frame = card("Geração de quadros")
-        graphicsChoice(frame, "Método", "framegen", 0, listOf(0 to "Desligado", 1 to "FSR 3.1 · 2×",
-            2 to "Piston Frame · 2×", 3 to "Piston Frame · 3×", 4 to "Piston Frame · 4×", 5 to "Mescla · 2×"))
-        graphicsChoice(frame, "Modelo Piston Frame", "fg_model", 0,
+        val frame = card(getString(R.string.frame_generation))
+        graphicsChoice(frame, getString(R.string.method), "framegen", 0, listOf(0 to getString(R.string.off), 1 to "FSR 3.1 · 2×",
+            2 to "Piston Frame · 2×", 3 to "Piston Frame · 3×", 4 to "Piston Frame · 4×", 5 to getString(R.string.blend)))
+        graphicsChoice(frame, getString(R.string.frame_model), "fg_model", 0,
             listOf(0 to "Lossless Scaling", 1 to "MAKO-FG experimental"))
-        graphicsSlider(frame, "Escala de movimento", "fg_flow", 25, 100, 75)
-        graphicsToggle(frame, "Modo desempenho", "fg_fast", true)
-        graphicsToggle(frame, "Meia precisão (FP16)", "fg_fp16", true)
+        graphicsSlider(frame, getString(R.string.frame_motion), "fg_flow", 25, 100, 75)
+        graphicsToggle(frame, getString(R.string.performance_mode), "fg_fast", true)
+        graphicsToggle(frame, getString(R.string.half_precision), "fg_fp16", true)
         frameAssets = PortStyle.text(this@HomeActivity, "", 13f, PortStyle.muted)
         append(frame, frameAssets)
-        importLossless = button("Importar Lossless.dll") {
+        importLossless = button(getString(R.string.import_lossless)) {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "*/*"
             }, PICK_LOSSLESS)
         }
         append(frame, importLossless)
-        downloadMako = button("Baixar modelo MAKO-FG") {
+        downloadMako = button(getString(R.string.download_mako)) {
             AlertDialog.Builder(this@HomeActivity).setTitle("MAKO-FG de Eugenio Segala")
-                .setMessage("Modelo CC BY-NC 4.0 para uso não comercial em pesquisa e educação. Requer um driver com AHardwareBuffer e sincronização Vulkan por arquivos.")
-                .setNegativeButton("Cancelar", null)
-                .setPositiveButton("Baixar") { _, _ -> frameAssetTask { FrameGenAssets.installMako(graphicsProfile()) } }
+                .setMessage(getString(R.string.mako_license))
+                .setNegativeButton(getString(R.string.cancel), null)
+                .setPositiveButton(getString(R.string.download)) { _, _ -> frameAssetTask { FrameGenAssets.installMako(graphicsProfile()) } }
                 .show()
         }
         append(frame, downloadMako)
         append(this, frame)
-        val driver = card("Hub de drivers")
+        val driver = card(getString(R.string.driver_hub))
         settingsGpu = PortStyle.text(this@HomeActivity, "", 14f, PortStyle.muted)
         driver.addView(settingsGpu)
         driverStatus = PortStyle.text(this@HomeActivity, "", 14f, PortStyle.muted)
         driver.addView(driverStatus)
-        importDriver = button("Importar driver") {
+        importDriver = button(getString(R.string.import_driver)) {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
                 type = "*/*"
             }, PICK_DRIVER)
         }
         append(driver, importDriver)
-        openHub = button("Abrir Hub de drivers", primary = true) { showDriverHub(lastHubSource) }
+        openHub = button(getString(R.string.open_hub), primary = true) { showDriverHub(lastHubSource) }
         append(driver, openHub)
+        compatibilityButton = button(getString(R.string.compatibility_review)) { showHardwareNotice(manual = true) }
+        append(driver, compatibilityButton)
         append(this, driver)
         diagnostics = PortStyle.text(this@HomeActivity, "", 12f, PortStyle.muted).apply {
             typeface = Typeface.MONOSPACE
@@ -306,18 +315,18 @@ class HomeActivity : Activity() {
     }
 
     private fun buildControls(): LinearLayout = column().apply {
-        val card = card("Controles de corrida")
+        val card = card(getString(R.string.race_controls))
         val toggle = Switch(this@HomeActivity).apply {
-            text = "Controles na tela"
+            text = getString(R.string.touch_controls)
             setTextColor(PortStyle.text)
             isChecked = settings.touch
             minHeight = dp(48)
             setOnCheckedChangeListener { _, checked -> settings.touch = checked }
         }
         card.addView(toggle)
-        choices(card, "Opacidade", listOf(55 to "55%", 70 to "70%", 85 to "85%", 100 to "100%"),
+        choices(card, getString(R.string.opacity), listOf(55 to "55%", 70 to "70%", 85 to "85%", 100 to "100%"),
             { settings.opacity }, { settings.opacity = it })
-        append(card, button("Editar layout em tela cheia") {
+        append(card, button(getString(R.string.edit_fullscreen)) {
             startActivity(Intent(this@HomeActivity, TouchLayoutActivity::class.java))
         })
         addView(card)
@@ -406,7 +415,7 @@ class HomeActivity : Activity() {
                     save(options[index].first)
                     control.text = label()
                     dialog.dismiss()
-                }.setNegativeButton("Fechar", null).show()
+                }.setNegativeButton(getString(R.string.close), null).show()
         }
         append(parent, control)
     }
@@ -474,8 +483,8 @@ class HomeActivity : Activity() {
             if (!ready) {
                 panelDialog(card("Piston Frame").apply {
                     addView(PortStyle.text(this@HomeActivity,
-                        if (mako) "Baixe MAKO-FG em Gráficos → Geração de quadros."
-                        else "Importe sua Lossless.dll em Gráficos → Geração de quadros.", 15f, PortStyle.muted))
+                        if (mako) getString(R.string.missing_model_mako)
+                        else getString(R.string.missing_model_dll), 15f, PortStyle.muted))
                 }).show()
                 return
             }
@@ -525,29 +534,39 @@ class HomeActivity : Activity() {
         super.onPause()
     }
 
-    private fun showHardwareNotice() {
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) showHardwareNotice()
+    }
+
+    private fun showHardwareNotice(manual: Boolean = false) {
         val info = gpuInfo ?: return
-        if (settings.hardwareNoticeShown || !resumed || isFinishing || isDestroyed) return
+        if ((!manual && settings.hardwareNoticeAcknowledged) || !resumed ||
+            !hasWindowFocus() || isFinishing || isDestroyed || hardwareNotice != null) return
         val sources = DriverCatalog.sourcesFor(info)
-        val content = card(if (info.stockReady) "Vulkan disponível" else "Compatibilidade Vulkan")
+        val content = card(if (info.stockReady) getString(R.string.vulkan_available) else getString(R.string.vulkan_compatibility))
         val kind = info.driverKind
         val suggestPanvk = kind == DriverKind.PANVK && VulkanDriver.selected(this, kind) == null
         val message = if (suggestPanvk && info.stockReady && sources.isNotEmpty())
-            "${info.label}\nSe quiser experimentar o PanVK, escolha um pacote para sua Mali no Hub."
-        else info.label
+            info.summary(this) + "\n" + getString(R.string.panvk_optional)
+        else info.summary(this)
         content.addView(PortStyle.text(this, message, 15f, PortStyle.muted))
         val dialog = panelDialog(content)
+        hardwareNotice = dialog
+        dialog.setOnDismissListener { hardwareNotice = null }
+        dialog.setOnCancelListener { settings.hardwareNoticeAcknowledged = true }
         if (kind != null && sources.isNotEmpty() && (suggestPanvk || !info.stockReady)) {
-            append(content, button("Abrir Hub ${kind.label}", primary = true) {
+            append(content, button(getString(R.string.open_kind_hub, kind.label), primary = true) {
+                settings.hardwareNoticeAcknowledged = true
                 dialog.dismiss()
                 showDriverHub(sources.first())
             })
         }
-        append(content, button("Entendi", primary = sources.isEmpty() || info.stockReady && !suggestPanvk) {
+        append(content, button(getString(R.string.understood), primary = sources.isEmpty() || info.stockReady && !suggestPanvk) {
+            settings.hardwareNoticeAcknowledged = true
             dialog.dismiss()
         })
         dialog.show()
-        settings.hardwareNoticeShown = true
     }
 
     private fun panelDialog(content: View): AlertDialog =
@@ -561,30 +580,31 @@ class HomeActivity : Activity() {
         val kind = gpuInfo?.driverKind
         val selectedDriver = VulkanDriver.selected(this, kind)
         val installed = VulkanDriver.list(this, kind)
-        val gpuLabel = gpuInfo?.label ?: "Detectando GPU e Vulkan…"
+        val gpuLabel = gpuInfo?.summary(this) ?: getString(R.string.gpu_detecting)
         settingsGpu.text = gpuLabel
         select.isEnabled = idle
         play.isEnabled = idle && folder != null && gpuInfo != null
         play.alpha = if (play.isEnabled) 1f else .6f
         importDriver.visibility = if (kind == null) View.GONE else View.VISIBLE
-        importDriver.text = "Importar ${kind?.label.orEmpty()} (ZIP, ADPKG ou .so)"
+        importDriver.text = getString(R.string.import_kind, kind?.label.orEmpty())
         importDriver.isEnabled = idle && kind != null
-        openHub.text = kind?.let { "Abrir Hub ${it.label}" } ?: "Abrir Hub de drivers"
+        openHub.text = kind?.let { getString(R.string.open_kind_hub, it.label) } ?: getString(R.string.open_hub)
         openHub.isEnabled = gpuInfo != null && (idle || installingDriver)
+        compatibilityButton.isEnabled = gpuInfo != null
         importLossless.isEnabled = idle
         downloadMako.isEnabled = idle && !FrameGenAssets.makoInstalled(graphicsProfile())
-        frameAssets.text = if (frameAssetBusy) "Instalando arquivo de framegen…" else {
-            val lossless = if (FrameGenAssets.lossless(graphicsProfile()).isFile) "importada" else "pendente"
-            val mako = if (FrameGenAssets.makoInstalled(graphicsProfile())) "instalado" else "pendente"
+        frameAssets.text = if (frameAssetBusy) getString(R.string.installing_framegen) else {
+            val lossless = if (FrameGenAssets.lossless(graphicsProfile()).isFile) getString(R.string.imported) else getString(R.string.pending)
+            val mako = if (FrameGenAssets.makoInstalled(graphicsProfile())) getString(R.string.installed) else getString(R.string.pending)
             "Lossless.dll · $lossless\nMAKO-FG · $mako"
         }
-        val driverName = installed.firstOrNull { it.id == selectedDriver }?.name ?: "Vulkan do sistema"
-        driverStatus.text = listOfNotNull("Selecionado: $driverName", DriverInstall.status?.message)
+        val driverName = installed.firstOrNull { it.id == selectedDriver }?.name ?: getString(R.string.stock_driver)
+        driverStatus.text = listOfNotNull(getString(R.string.driver_selected, driverName), DriverInstall.status?.message)
             .joinToString("\n")
         status.text = when {
-            preparing -> "Preparando a inicialização do jogo…"
-            selecting -> "Verificando a pasta do jogo…"
-            folder == null -> "Selecione a pasta extraída CUSA07027 v01.00 que contém eboot.bin."
+            preparing -> getString(R.string.starting_game)
+            selecting -> getString(R.string.checking_folder)
+            folder == null -> getString(R.string.folder_help)
             else -> "CUSA07027 v01.00 · ${folder.name}"
         }
         diagnostics.text = readLog(GameActivity.logFile(this))
@@ -602,8 +622,8 @@ class HomeActivity : Activity() {
     private fun showDriverHub(preferred: DriverCatalog.Source?) {
         val gpu = gpuInfo ?: return
         val kind = gpu.driverKind
-        val root = card(kind?.let { "Hub ${it.label}" } ?: "Hub de drivers")
-        root.addView(PortStyle.text(this, gpu.name, 14f, PortStyle.muted))
+        val root = card(kind?.let { getString(R.string.kind_hub, it.label) } ?: getString(R.string.driver_hub))
+        root.addView(PortStyle.text(this, gpu.displayName(this), 14f, PortStyle.muted))
         val tabs = column()
         append(root, tabs)
         val installStatus = PortStyle.text(this, "", 14f, PortStyle.muted).apply {
@@ -624,7 +644,7 @@ class HomeActivity : Activity() {
         val buttons = mutableListOf<Button>()
         var active: DriverCatalog.Source? = null
         val loading = mutableSetOf<DriverCatalog.Source>()
-        val refreshCatalog = button("Atualizar") {}
+        val refreshCatalog = button(getString(R.string.refresh)) {}
         var lastInstallStatus = DriverInstall.status
 
         fun message(label: String) {
@@ -643,8 +663,8 @@ class HomeActivity : Activity() {
             val row = card(name)
             row.addView(PortStyle.text(this, detail, 13f, PortStyle.muted))
             val selectedNow = id == VulkanDriver.selected(this, kind).orEmpty()
-            append(row, button(if (selectedNow) "Selecionado" else action,
-                primary = !selectedNow && action == "Baixar", click = { if (!installingDriver) run() }).apply {
+            append(row, button(if (selectedNow) getString(R.string.selected) else action,
+                primary = !selectedNow && action == getString(R.string.download), click = { if (!installingDriver) run() }).apply {
                 isEnabled = !selectedNow && !installingDriver
                 if (selectedNow) mark(this, true)
             })
@@ -653,17 +673,17 @@ class HomeActivity : Activity() {
 
         fun display(entries: List<DriverCatalog.Entry>) {
             results.removeAllViews()
-            if (entries.isEmpty()) message("Nenhum driver listado para esta família.")
+            if (entries.isEmpty()) message(getString(R.string.no_drivers))
             val installedIds = VulkanDriver.list(this, kind).map { it.id }.toSet()
             for (entry in entries) {
                 val size = "%.1f MiB".format(entry.size / 1048576.0)
                 val present = entry.id in installedIds
                 val details = "${entry.source} · $size" + if (present) " · Instalado" else ""
-                addDriver(entry.id, entry.name, details, if (present) "Ativar" else "Baixar") {
+                addDriver(entry.id, entry.name, details, if (present) getString(R.string.activate) else getString(R.string.download)) {
                     if (present) selectDriver(entry.id)
                     else {
                         val context = applicationContext
-                        DriverInstall.start(entry.name, "Baixando ${entry.name}…") { report ->
+                        DriverInstall.start(entry.name, getString(R.string.download_driver, entry.name)) { report ->
                             DriverCatalog.install(context, entry, report)
                         }
                     }
@@ -680,11 +700,11 @@ class HomeActivity : Activity() {
             scroll.scrollTo(0, 0)
             refreshCatalog.isEnabled = source != null && !installingDriver
             if (source == null) {
-                addDriver("", "Vulkan do sistema", "Driver padrão do Android", "Ativar") { selectDriver("") }
+                addDriver("", getString(R.string.stock_driver), getString(R.string.android_driver), getString(R.string.activate)) { selectDriver("") }
                 for (entry in VulkanDriver.list(this, kind)) {
-                    addDriver(entry.id, entry.name, "${kind?.label} instalado", "Ativar") { selectDriver(entry.id) }
+                    addDriver(entry.id, entry.name, getString(R.string.driver_installed, kind?.label.orEmpty()), getString(R.string.activate)) { selectDriver(entry.id) }
                 }
-                if (sources.size == 1) message("O catálogo não tem pacotes para esta GPU.")
+                if (sources.size == 1) message(getString(R.string.no_catalog))
                 return
             }
             if (!force) catalogs[source]?.let {
@@ -693,7 +713,7 @@ class HomeActivity : Activity() {
                 return
             }
             refreshCatalog.isEnabled = false
-            message("Carregando drivers de ${source.label}…")
+            message(getString(R.string.loading_catalog, source.label))
             if (!loading.add(source)) return
             Thread {
                 val result = runCatching { DriverCatalog.fetch(source, gpu) }
@@ -704,7 +724,7 @@ class HomeActivity : Activity() {
                     refreshCatalog.isEnabled = !installingDriver
                     result.onSuccess(::display).onFailure {
                         results.removeAllViews()
-                        message("Falha ao consultar ${source.label}. ${it.message.orEmpty()}")
+                        message(getString(R.string.catalog_failed, source.label, it.message.orEmpty()))
                     }
                 }
             }.start()
@@ -713,7 +733,7 @@ class HomeActivity : Activity() {
         for (pair in sources.chunked(2)) {
             val row = LinearLayout(this)
             for ((index, source) in pair.withIndex()) {
-                val tab = button(source?.label ?: "Instalados") { if (!installingDriver) show(source) }
+                val tab = button(source?.label ?: getString(R.string.installed_title)) { if (!installingDriver) show(source) }
                 buttons.add(tab)
                 row.addView(tab, LinearLayout.LayoutParams(0, -2, 1f).apply {
                     if (index > 0) marginStart = dp(6)
@@ -724,7 +744,7 @@ class HomeActivity : Activity() {
         refreshCatalog.setOnClickListener { if (!installingDriver) show(active, force = true) }
         val actions = LinearLayout(this)
         actions.addView(refreshCatalog, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
-        actions.addView(button("Fechar") { dialog.dismiss() }, LinearLayout.LayoutParams(0, -2, 1f))
+        actions.addView(button(getString(R.string.close)) { dialog.dismiss() }, LinearLayout.LayoutParams(0, -2, 1f))
         append(root, actions)
         hubUpdate = {
             val status = DriverInstall.status
